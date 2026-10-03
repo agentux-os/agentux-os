@@ -1,0 +1,30 @@
+#!/usr/bin/bash
+# Installs per-user tools that update faster than the image: the coding agent
+# CLIs and the mise-managed dev tools. Runs once per user; rerun with
+# `rm ~/.local/state/agentux/first-login.done` to repeat.
+set -uo pipefail
+
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentux"
+marker="$state_dir/first-login.done"
+[[ -e "$marker" ]] && exit 0
+mkdir -p "$state_dir" "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+
+failed=()
+step() {
+    local name="$1"; shift
+    echo "agentux: installing $name"
+    "$@" || failed+=("$name")
+}
+
+step "Claude Code"      bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+step "OpenCode"         bash -c 'curl -fsSL https://opencode.ai/install | bash'
+step "Antigravity CLI"  bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
+step "Codex"            npm install --global --prefix "$HOME/.local" @openai/codex
+step "dev tools"        mise use --global bun lazygit ast-grep yq
+
+if (( ${#failed[@]} )); then
+    echo "agentux: failed: ${failed[*]}; will retry on next login" >&2
+    exit 1
+fi
+touch "$marker"
