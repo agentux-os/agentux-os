@@ -34,3 +34,16 @@ jobs:
           for t in latest "$tag"; do
             podman push agentux:ci "docker://${IMAGE}:${t}"
           done
+
+  lint:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck files/usr/libexec/agentux/*
+
+      - name: hadolint
+        run: docker run --rm -v "$PWD:/src:ro" -w /src hadolint/hadolint:v2.15.1 hadolint Containerfile

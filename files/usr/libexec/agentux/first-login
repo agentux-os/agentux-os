@@ -17,9 +17,9 @@ step() {
     "$@" || failed+=("$name")
 }
 
-step "Claude Code"      bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
-step "OpenCode"         bash -c 'curl -fsSL https://opencode.ai/install | bash'
-step "Antigravity CLI"  bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
+step "Claude Code"      bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash'
+step "OpenCode"         bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash'
+step "Antigravity CLI"  bash -o pipefail -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
 step "Codex"            npm install --global --prefix "$HOME/.local" @openai/codex
 step "dev tools"        mise use --global bun lazygit ast-grep yq
 

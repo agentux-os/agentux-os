@@ -1,0 +1,85 @@
+name: Build ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Image to build the installer from
+        default: ghcr.io/agentux-os/agentux:latest
+  push:
+    tags: ["v*"]
+  # Check that the installer still builds when its definition changes.
+  pull_request:
+    paths:
+      - .github/workflows/iso.yml
+      - disk_config/iso.toml
+
+env:
+  IMAGE: ${{ inputs.image || 'ghcr.io/agentux-os/agentux:latest' }}
+  BIB: quay.io/centos-bootc/bootc-image-builder:latest
+
+jobs:
+  iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image, the builder and the ISO together need far more than the
+      # ~20 GB a fresh runner has free.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+            /usr/local/.ghcup /usr/local/share/powershell /usr/local/julia* \
+            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+          sudo docker image prune --all --force
+          df -h /
+
+      # bootc-image-builder runs rootful and reads the image from root's
+      # container storage.
+      - name: Pull image
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | sudo podman login ghcr.io --username "${{ github.actor }}" --password-stdin
+          sudo podman pull "$IMAGE"
+          sudo podman pull "$BIB"
+
+      - name: Build ISO
+        run: |
+          mkdir -p output
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v ./disk_config/iso.toml:/config.toml:ro \
+            -v ./output:/output \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            "$BIB" \
+            --type anaconda-iso \
+            --rootfs btrfs \
+            --use-librepo=True \
+            --chown "$(id -u):$(id -g)" \
+            "$IMAGE"
+
+      - name: Name and checksum the ISO
+        id: iso
+        run: |
+          name="agentux-$(date -u +%Y%m%d)-x86_64"
+          mv output/bootiso/install.iso "$name.iso"
+          sha256sum "$name.iso" > "$name.iso.sha256"
+          ls -lh "$name.iso"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.iso.outputs.name }}
+          path: |
+            ${{ steps.iso.outputs.name }}.iso
+            ${{ steps.iso.outputs.name }}.iso.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error

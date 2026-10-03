@@ -1,0 +1,4 @@
+ignored:
+  # Packages come from the Fedora release the image is built on and are
+  # refreshed by the daily rebuild; pinning versions would freeze them.
+  - DL3041
