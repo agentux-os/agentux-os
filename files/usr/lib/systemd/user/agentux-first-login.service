@@ -1,0 +1,12 @@
+[Unit]
+Description=Install AgentUX per-user tools (agent CLIs, dev tools)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!%S/agentux/first-login.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/agentux/first-login
+
+[Install]
+WantedBy=default.target
