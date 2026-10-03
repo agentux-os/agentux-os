@@ -1,0 +1,17 @@
+# bootc-image-builder config for the Anaconda installer ISO.
+#
+# Without a kickstart, an anaconda-iso installs unattended to the first disk
+# it finds. A kickstart that sets only the UI mode makes the install
+# interactive instead: the user picks the disk, language, time zone and
+# creates their account. bootc-image-builder adds the `ostreecontainer`
+# command that installs the AgentUX image.
+[customizations.installer.kickstart]
+contents = """
+graphical
+"""
+
+[customizations.installer.modules]
+enable = [
+  "org.fedoraproject.Anaconda.Modules.Localization",
+  "org.fedoraproject.Anaconda.Modules.Timezone",
+]

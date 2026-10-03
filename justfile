@@ -1,0 +1,74 @@
+# Local build and test of the AgentUX image. Needs Linux with podman;
+# `iso` and `qcow2` need sudo, `vm` needs qemu with KVM and OVMF.
+
+image := env("AGENTUX_IMAGE", "localhost/agentux:dev")
+bib := "quay.io/centos-bootc/bootc-image-builder:latest"
+hadolint := "docker.io/hadolint/hadolint:v2.15.1"
+
+default:
+    @just --list
+
+# Build the image into your podman storage
+build:
+    podman build --tag {{ image }} .
+
+# Build an Anaconda installer ISO from the local image (output/bootiso/install.iso)
+iso: (_bib "anaconda-iso" "disk_config/iso.toml")
+
+# Build a qcow2 disk from the local image; config adds a user, e.g. [[customizations.user]]
+qcow2 config="": (_bib "qcow2" config)
+
+# Boot the ISO onto output/vm-disk.qcow2 (iso), boot that disk (disk), or boot output/qcow2/disk.qcow2 (qcow2)
+vm target="iso":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ovmf=""
+    for f in /usr/share/edk2/ovmf/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/qemu/OVMF.fd; do
+        [[ -e "$f" ]] && { ovmf="$f"; break; }
+    done
+    [[ -n "$ovmf" ]] || { echo "OVMF firmware not found; install edk2-ovmf (Fedora) or ovmf (Debian/Ubuntu)" >&2; exit 1; }
+    args=(-machine q35,accel=kvm -cpu host -smp 4 -m 8192 -bios "$ovmf"
+          -device virtio-vga -display gtk -nic user,model=virtio-net-pci)
+    case "{{ target }}" in
+        iso)
+            # The installer writes to output/vm-disk.qcow2; boot it again later with target=disk.
+            [[ -e output/vm-disk.qcow2 ]] || qemu-img create -f qcow2 output/vm-disk.qcow2 64G
+            qemu-system-x86_64 "${args[@]}" -boot d -cdrom output/bootiso/install.iso \
+                -drive file=output/vm-disk.qcow2,if=virtio ;;
+        disk)
+            qemu-system-x86_64 "${args[@]}" -drive file=output/vm-disk.qcow2,if=virtio ;;
+        qcow2)
+            qemu-system-x86_64 "${args[@]}" -snapshot -drive file=output/qcow2/disk.qcow2,if=virtio ;;
+        *)
+            echo "target must be iso, disk or qcow2" >&2; exit 1 ;;
+    esac
+
+# Run shellcheck on the scripts and hadolint on the Containerfile
+lint:
+    shellcheck files/usr/libexec/agentux/*
+    podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile
+
+# Run bootc-image-builder (rootful) on the local image
+_bib type config:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # bootc-image-builder reads the image from root's container storage.
+    if [[ "$(id -u)" -ne 0 ]]; then
+        podman save {{ image }} | sudo podman load
+    fi
+    mkdir -p output
+    config_args=()
+    if [[ -n "{{ config }}" ]]; then
+        config_args=(-v "$(realpath "{{ config }}"):/config.toml:ro")
+    fi
+    sudo podman run --rm -it --privileged --pull=newer \
+        --security-opt label=type:unconfined_t \
+        "${config_args[@]}" \
+        -v "$PWD/output:/output" \
+        -v /var/lib/containers/storage:/var/lib/containers/storage \
+        {{ bib }} \
+        --type {{ type }} \
+        --rootfs btrfs \
+        --use-librepo=True \
+        --chown "$(id -u):$(id -g)" \
+        {{ image }}
