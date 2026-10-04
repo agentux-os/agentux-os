@@ -98,7 +98,7 @@ check_first_login() {
         (( SECONDS - start >= limit )) && break
         sleep 10
     done
-    echo "      $unit: $st, result $(systemctl --user show -P Result "$unit"), after $(( SECONDS - start ))s"
+    echo "      $unit: $st, result $(systemctl --user show -P Result "$unit"), ran $(systemctl --user show -P ExecMainStartTimestamp "$unit") .. $(systemctl --user show -P ExecMainExitTimestamp "$unit")"
     if [[ ! -e "$marker" && -n "${GITHUB_TOKEN:-}" ]]; then
         warn "first login did not complete on its own; its log:"
         journalctl --user -u "$unit" --no-pager -o cat -n 40 | indent
@@ -115,6 +115,31 @@ check_first_login() {
         journalctl --user -u "$unit" --no-pager -o cat -n 60 | indent
     fi
     failed_units --user
+}
+
+# The units are enabled globally, so every user manager gets them, including
+# those of system users with a session (plasma-setup's first-boot wizard).
+# Their messages in the journal carry the manager's UID.
+check_system_users() {
+    echo "== AgentUX user units only run for regular users"
+    local uid_min unit uids u
+    uid_min="$(awk '$1 == "UID_MIN" {print $2}' /etc/login.defs)"
+    for unit in agentux-first-login.service agentuxd.service 'app-agentux\x2dcockpit@autostart.service'; do
+        uids="$(sudo journalctl -b -o json USER_UNIT="$unit" | jq -r '._UID' | sort -un | tr '\n' ' ')"
+        uids="${uids% }"
+        local system_uids=()
+        for u in $uids; do
+            (( u < ${uid_min:-1000} )) && system_uids+=("$u ($(id -nu "$u" 2>/dev/null))")
+        done
+        if (( ${#system_uids[@]} == 0 )); then
+            ok "$unit ran only for UIDs >= ${uid_min:-1000} [${uids:-none}]"
+        elif [[ "$unit" == app-* ]]; then
+            # The cockpit autostart comes from agentux-desktop's Plasma overlay.
+            warn "$unit also started for system users: ${system_uids[*]}"
+        else
+            bad "$unit also ran for system users: ${system_uids[*]}"
+        fi
+    done
 }
 
 check_user_path() {
@@ -194,8 +219,8 @@ EOF
     git -C "$repo" -c user.name="AgentUX Boot Test" -c user.email=boot-test@agentux.invalid \
         commit --quiet --message=init
 
-    if ! run_id="$(aux --socket "$sock" run "$repo" --prompt "Boot test run" 2>&1)"; then
-        bad "aux run"; indent <<<"$run_id"
+    if ! run_id="$(aux --socket "$sock" run "$repo" --prompt "Boot test run" 2>"$tmp/run.err")"; then
+        bad "aux run"; indent <"$tmp/run.err"
     else
         ok "aux run started $run_id"
         if wait_for 60 bash -c "aux --socket '$sock' ps | grep -qx 'WAITING FOR YOU'"; then
@@ -278,6 +303,7 @@ case "$phase" in
         check_image
         check_system
         check_first_login
+        check_system_users
         check_user_path
         check_agentuxd
         check_fake_run

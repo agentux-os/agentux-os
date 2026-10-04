@@ -83,13 +83,16 @@ run() {
     summary_line "Boot to SSH" "ok after ${waited}s"
     # Passwordless sudo for the rest of the test.
     vm "sudo -S -p '' sh -c 'echo \"$user ALL=(ALL) NOPASSWD: ALL\" >/etc/sudoers.d/90-boot-test && chmod 0440 /etc/sudoers.d/90-boot-test'" \
-        <"$dir/password" >/dev/null
+        <"$dir/password" >/dev/null 2>&1
+    # Keep the user manager (and first-login, which it starts) running between
+    # SSH connections; otherwise each disconnect stops it.
+    vm "sudo loginctl enable-linger $user"
     vm 'cat >/var/tmp/boot.sh && chmod +x /var/tmp/boot.sh' <"$here/boot.sh"
 
-    # The greeter, once the display manager has had time to show it.
+    # The first boot screen: the greeter, or plasma-setup's first-boot wizard.
     vm 'timeout 300 bash -c "until systemctl is-active -q display-manager.service; do sleep 5; done"' || true
     sleep 20
-    screenshot 01-login-screen
+    screenshot 01-first-boot
 
     echo "::group::system checks"
     set +e
