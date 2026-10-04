@@ -9,7 +9,20 @@ The [AgentUX](https://github.com/agentux-os/agentux) Linux distribution image: a
 - **Base:** Fedora Kinoite â€” immutable `/usr`, atomic updates, previous image always bootable for rollback.
 - **System toolchain:** `git`, `gh`, `ripgrep`, `fd`, `jq`, `bat`, `delta`, `just`, `uv`, Node.js, `mise`, Podman, Distrobox.
 - **Coding agent CLIs:** Claude Code, Codex, OpenCode and Antigravity CLI, plus their [ACP](https://agentclientprotocol.com) adapters, installed per user on first login so each can keep itself up to date. `/etc/profile.d/agentux.sh` puts `~/.local/bin` and mise's shims on every login shell's `PATH`.
-- **AgentUX:** `agentuxd`, `aux` and the cockpit (once [agentux-core](https://github.com/agentux-os/agentux-core) and [agentux-desktop](https://github.com/agentux-os/agentux-desktop) ship).
+- **AgentUX:** from [agentux-core](https://github.com/agentux-os/agentux-core), the `aux` CLI and the `agentuxd` daemon, which runs as a systemd user service enabled for every user (`systemctl --global enable agentuxd.service`, socket at `$XDG_RUNTIME_DIR/agentux/agentuxd.sock`); from [agentux-desktop](https://github.com/agentux-os/agentux-desktop), the AgentUX Cockpit (`agentux-cockpit`) and the Plasma 6 defaults: the AgentUX global theme, wallpaper, panel layout, Meta+A / Meta+Return shortcuts and cockpit autostart, all as system-wide defaults that each user can override.
+- **User environment:** `/usr/lib/environment.d/60-agentux.conf` puts `~/.local/bin` and mise's shims on the `PATH` of the systemd user manager too, so user services (`agentuxd` and the agent CLIs it starts) and apps launched from Plasma (the cockpit) find the per-user tools, not only login shells.
+
+### AgentUX versions
+
+The AgentUX components are installed from their GitHub releases, pinned in one place, the `ARG`s at the top of the AgentUX section of the [`Containerfile`](Containerfile):
+
+| Pin | What it selects |
+|---|---|
+| `AGENTUX_CORE_VERSION` | `agentux-<version>-1.fc44.x86_64.rpm` from agentux-core's `v<version>` release |
+| `AGENTUX_DESKTOP_VERSION` | `agentux-cockpit-<version>-1.x86_64.rpm` and `agentux-plasma-<version>.tar.gz` from agentux-desktop's `v<version>` release |
+| `AGENTUX_PLASMA_SHA256` | sha256 of that Plasma tarball; the build fails if the download doesn't match |
+
+Both RPMs go through `dnf install`; the Plasma tarball (paths relative to `/`, only `usr/` and `etc/`) is extracted over `/` after the checksum check. To move to newer releases, run `just bump-agentux` (needs an authenticated `gh`): it takes the newest non-draft release of each repo, pre-releases included, rewrites the three pins from it (the checksum comes from the release's `.sha256` asset) and shows the diff to commit. A build with other versions without editing the file: `podman build --build-arg AGENTUX_CORE_VERSION=… .`. If a release ever changes the RPM's release number or Fedora tag (`-1.fc44`), update the file name in the `Containerfile` by hand.
 
 ## Install
 
@@ -46,9 +59,10 @@ just vm           # install the ISO into a VM disk, output/vm-disk.qcow2
 just vm disk      # boot the installed VM disk
 just smoke        # real first login in a container of the image, then check every tool resolves
 just lint         # shellcheck + hadolint, the same checks as CI
+just bump-agentux # move the AgentUX pins to the latest releases (see above)
 ```
 
-CI runs the same smoke test (`tests/smoke.sh`) on every pull request: it builds the image, runs it as a container, creates a regular user, runs `first-login` for real and checks from a clean login shell (`bash -lc`) that `claude`, `opencode`, `agy`, `codex`, `bun`, `lazygit`, `ast-grep` and `yq` print a version, that the first-login marker exists and that the system toolchain is on `PATH`. The ACP adapters (`claude-agent-acp`, `codex-acp`) and Antigravity's ACP server (`agy-acp-server`, a ~1 GB download resolved from the [ACP registry](https://github.com/agentclientprotocol/registry)) are optional: first-login installs them when it can, and the smoke test only warns if they are missing.
+CI runs the same smoke test (`tests/smoke.sh`) on every pull request: it builds the image, runs it as a container, creates a regular user, runs `first-login` for real and checks from a clean login shell (`bash -lc`) that `claude`, `opencode`, `agy`, `codex`, `bun`, `lazygit`, `ast-grep` and `yq` print a version, that the first-login marker exists and that the system toolchain is on `PATH`. For AgentUX it checks that `aux`, `agentuxd` and `agentux-cockpit` are installed and `aux --version` / `agentuxd --version` run, that the Plasma theme is in place and selected in `/etc/xdg/kdeglobals`, that `agentuxd` and first-login are enabled for all users, starts `agentuxd` as the test user with a temporary `XDG_RUNTIME_DIR` and runs `aux ps` against it, and resolves the user manager's environment with `systemd-environment-d-generator` to check that `PATH` starts with `~/.local/bin` and mise's shims. The ACP adapters (`claude-agent-acp`, `codex-acp`) and Antigravity's ACP server (`agy-acp-server`, a ~1 GB download resolved from the [ACP registry](https://github.com/agentclientprotocol/registry)) are optional: first-login installs them when it can, and the smoke test only warns if they are missing.
 
 `just qcow2 path/to/config.toml` builds a ready-to-boot disk instead (`just vm qcow2` boots it); the config should add a user with `[[customizations.user]]`. Set `AGENTUX_IMAGE` to build from another image, e.g. `AGENTUX_IMAGE=ghcr.io/agentux-os/agentux:latest just iso` after a `podman pull`.
 
