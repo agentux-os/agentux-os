@@ -1,14 +1,17 @@
 #!/usr/bin/bash
 # Installs per-user tools that update faster than the image: the coding agent
-# CLIs and the mise-managed dev tools. Runs once per user; rerun with
-# `rm ~/.local/state/agentux/first-login.done` to repeat.
+# CLIs, their ACP adapters and the mise-managed dev tools. Runs once per user;
+# rerun with `rm ~/.local/state/agentux/first-login.done` to repeat.
 set -uo pipefail
 
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentux"
+data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
 marker="$state_dir/first-login.done"
 [[ -e "$marker" ]] && exit 0
 mkdir -p "$state_dir" "$HOME/.local/bin"
-export PATH="$HOME/.local/bin:$PATH"
+# The systemd user service starts with a minimal PATH; installers and the
+# post-install checks below need to find what was just installed.
+export PATH="$HOME/.local/bin:$data_dir/mise/shims:$PATH"
 
 failed=()
 step() {
@@ -17,11 +20,59 @@ step() {
     "$@" || failed+=("$name")
 }
 
+# Optional steps only speed things up or add extras; a failure is reported
+# but does not keep the marker from being written.
+optional() {
+    local name="$1"; shift
+    echo "agentux: installing $name (optional)"
+    "$@" || echo "agentux: warning: $name failed; skipped" >&2
+}
+
+install_opencode() {
+    # The installer puts the binary in ~/.opencode/bin, where it also updates
+    # itself; link it into ~/.local/bin instead of editing shell rc files.
+    curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path \
+        && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
+}
+
+# Antigravity's ACP server is a separate ~1 GB download whose URL changes with
+# every release, so resolve it from the ACP registry instead of pinning it.
+install_antigravity_acp() {
+    local registry=https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json
+    local arch url dest tmp
+    case "$(uname -m)" in
+        x86_64) arch=linux-x86_64 ;;
+        aarch64) arch=linux-aarch64 ;;
+        *) echo "unsupported architecture $(uname -m)" >&2; return 1 ;;
+    esac
+    url="$(curl -fsSL "$registry" \
+        | jq -er --arg a "$arch" '.agents[] | select(.id == "antigravity-acp") | .distribution.binary[$a].archive')" \
+        || return 1
+    dest="$data_dir/agentux/antigravity-acp"
+    tmp="$(mktemp -d)" || return 1
+    local rc=0
+    { curl -fsSL "$url" -o "$tmp/acp.zip" \
+        && unzip -q "$tmp/acp.zip" -d "$tmp/out" \
+        && chmod +x "$tmp/out/"* \
+        && rm -rf "$dest" && mkdir -p "$(dirname "$dest")" && mv "$tmp/out" "$dest" \
+        && ln -sf "$dest/agy_acp_server.par" "$HOME/.local/bin/agy-acp-server"; } \
+        || rc=1
+    rm -rf "$tmp"
+    return "$rc"
+}
+
 step "Claude Code"      bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash'
-step "OpenCode"         bash -o pipefail -c 'curl -fsSL https://opencode.ai/install | bash'
+step "OpenCode"         install_opencode
 step "Antigravity CLI"  bash -o pipefail -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
 step "Codex"            npm install --global --prefix "$HOME/.local" @openai/codex
 step "dev tools"        mise use --global bun lazygit ast-grep yq
+
+# ACP adapters for Claude Code and Codex (OpenCode speaks ACP itself via
+# `opencode acp`). Installing them now spares the first ACP session an npx
+# download; without them `npx -y` still works.
+optional "ACP adapters" npm install --global --prefix "$HOME/.local" \
+    @agentclientprotocol/claude-agent-acp @agentclientprotocol/codex-acp
+optional "Antigravity ACP server" install_antigravity_acp
 
 if (( ${#failed[@]} )); then
     echo "agentux: failed: ${failed[*]}; will retry on next login" >&2

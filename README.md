@@ -8,7 +8,7 @@ The [AgentUX](https://github.com/agentux-os/agentux) Linux distribution image: a
 
 - **Base:** Fedora Kinoite — immutable `/usr`, atomic updates, previous image always bootable for rollback.
 - **System toolchain:** `git`, `gh`, `ripgrep`, `fd`, `jq`, `bat`, `delta`, `just`, `uv`, Node.js, `mise`, Podman, Distrobox.
-- **Coding agent CLIs:** Claude Code, Codex, OpenCode and Antigravity CLI, installed per user on first login so each can keep itself up to date.
+- **Coding agent CLIs:** Claude Code, Codex, OpenCode and Antigravity CLI, plus their [ACP](https://agentclientprotocol.com) adapters, installed per user on first login so each can keep itself up to date. `/etc/profile.d/agentux.sh` puts `~/.local/bin` and mise's shims on every login shell's `PATH`.
 - **AgentUX:** `agentuxd`, `aux` and the cockpit (once [agentux-core](https://github.com/agentux-os/agentux-core) and [agentux-desktop](https://github.com/agentux-os/agentux-desktop) ship).
 
 ## Install
@@ -44,8 +44,11 @@ just build        # podman build -> localhost/agentux:dev
 just iso          # installer ISO from that image -> output/bootiso/install.iso (uses sudo)
 just vm           # install the ISO into a VM disk, output/vm-disk.qcow2
 just vm disk      # boot the installed VM disk
+just smoke        # real first login in a container of the image, then check every tool resolves
 just lint         # shellcheck + hadolint, the same checks as CI
 ```
+
+CI runs the same smoke test (`tests/smoke.sh`) on every pull request: it builds the image, runs it as a container, creates a regular user, runs `first-login` for real and checks from a clean login shell (`bash -lc`) that `claude`, `opencode`, `agy`, `codex`, `bun`, `lazygit`, `ast-grep` and `yq` print a version, that the first-login marker exists and that the system toolchain is on `PATH`. The ACP adapters (`claude-agent-acp`, `codex-acp`) and Antigravity's ACP server (`agy-acp-server`, a ~1 GB download resolved from the [ACP registry](https://github.com/agentclientprotocol/registry)) are optional: first-login installs them when it can, and the smoke test only warns if they are missing.
 
 `just qcow2 path/to/config.toml` builds a ready-to-boot disk instead (`just vm qcow2` boots it); the config should add a user with `[[customizations.user]]`. Set `AGENTUX_IMAGE` to build from another image, e.g. `AGENTUX_IMAGE=ghcr.io/agentux-os/agentux:latest just iso` after a `podman pull`.
 
