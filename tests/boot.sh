@@ -15,6 +15,8 @@ fail=0
 ok()   { printf 'ok    %s\n' "$*"; }
 bad()  { printf 'FAIL  %s\n' "$*"; fail=1; }
 warn() { printf 'warn  %s\n' "$*"; }
+# A measurement for the job summary: a name and a value.
+metric() { printf 'metric  %s: %s\n' "$1" "$2"; }
 indent() { sed 's/^/      /'; }
 
 # A description and a command that must succeed; its first output line is shown.
@@ -82,6 +84,29 @@ check_system() {
     assert "display manager active" systemctl is-active display-manager.service
 }
 
+# Polls agentux-first-login.service until it finished, failed for good, failed
+# once and waits to restart, or `limit` seconds passed. Meanwhile samples its
+# cgroup: the largest anonymous memory seen (what MemoryHigh cannot reclaim
+# without swap) and how often it went over MemoryHigh. Sets st and sub.
+watch_first_login() {
+    local unit="$1" limit="$2" start=$SECONDS cg anon high
+    while true; do
+        st="$(systemctl --user show -P ActiveState "$unit")"
+        sub="$(systemctl --user show -P SubState "$unit")"
+        cg="/sys/fs/cgroup$(systemctl --user show -P ControlGroup "$unit")"
+        if [[ "$cg" != /sys/fs/cgroup && -r "$cg/memory.stat" ]]; then
+            anon="$(awk '$1 == "anon" {print $2}' "$cg/memory.stat")"
+            (( ${anon:-0} > anon_max )) && anon_max="$anon"
+            high="$(awk '$1 == "high" {print $2}' "$cg/memory.events")"
+            [[ -n "$high" ]] && high_events="$high"
+        fi
+        [[ "$st" == inactive && -e "$marker" ]] && return
+        [[ "$st" == failed || "$sub" == auto-restart ]] && return
+        (( SECONDS - start >= limit )) && return
+        sleep 5
+    done
+}
+
 # The user manager: linger, failed units and the first-login service.
 check_first_login() {
     echo "== user session and first login"
@@ -90,22 +115,22 @@ check_first_login() {
         || warn "user default.target not active after 2 minutes"
 
     local unit=agentux-first-login.service
-    local limit="${FIRST_LOGIN_TIMEOUT:-1800}" start=$SECONDS st
+    assert "nm-online (first-login waits for the network with it)" test -x /usr/bin/nm-online
+    assert "$unit restarts on failure" \
+        bash -c "systemctl --user show -P Restart $unit | grep -qx on-failure"
+    local limit="${FIRST_LOGIN_TIMEOUT:-1800}" st="" sub="" anon_max=0 high_events=""
     echo "      waiting up to ${limit}s for $unit"
-    while true; do
-        st="$(systemctl --user show -P ActiveState "$unit")"
-        [[ -e "$marker" || "$st" == failed ]] && break
-        (( SECONDS - start >= limit )) && break
-        sleep 10
-    done
-    echo "      $unit: $st, result $(systemctl --user show -P Result "$unit"), ran $(systemctl --user show -P ExecMainStartTimestamp "$unit") .. $(systemctl --user show -P ExecMainExitTimestamp "$unit")"
+    watch_first_login "$unit" "$limit"
+    echo "      $unit: $st/$sub, result $(systemctl --user show -P Result "$unit"), restarts $(systemctl --user show -P NRestarts "$unit"), ran $(systemctl --user show -P ExecMainStartTimestamp "$unit") .. $(systemctl --user show -P ExecMainExitTimestamp "$unit")"
     if [[ ! -e "$marker" && -n "${GITHUB_TOKEN:-}" ]]; then
         warn "first login did not complete on its own; its log:"
         journalctl --user -u "$unit" --no-pager -o cat -n 40 | indent
-        echo "      retrying once with GITHUB_TOKEN in the user manager environment"
+        echo "      retrying now with GITHUB_TOKEN in the user manager environment"
         systemctl --user set-environment GITHUB_TOKEN="$GITHUB_TOKEN"
         systemctl --user reset-failed "$unit"
-        timeout "$limit" systemctl --user start "$unit"
+        systemctl --user start --no-block "$unit"
+        sleep 5
+        watch_first_login "$unit" "$limit"
         systemctl --user unset-environment GITHUB_TOKEN
     fi
     if [[ -e "$marker" ]]; then
@@ -114,6 +139,15 @@ check_first_login() {
         bad "$unit did not complete"
         journalctl --user -u "$unit" --no-pager -o cat -n 60 | indent
     fi
+    # systemd logs what each run used when it stops; the last one is the run
+    # that completed.
+    local used
+    used="$(journalctl --user -u "$unit" --no-pager -o cat \
+        | sed -n 's/^.*: Consumed //p' | tail -n1)"
+    echo "      used: ${used:-?}"
+    metric "first-login run" "${used:-?}"
+    metric "first-login largest anon memory (sampled every 5 s)" \
+        "$(( anon_max / 1048576 ))M, MemoryHigh=$(systemctl --user show -P MemoryHigh "$unit"), over it ${high_events:-?} times"
     failed_units --user
 }
 
