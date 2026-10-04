@@ -52,6 +52,21 @@ lint:
     shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh
     podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile
 
+# Move the AgentUX pins in the Containerfile to the latest releases (pre-releases included); needs gh
+bump-agentux:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    latest() {
+        gh release list --repo "agentux-os/$1" --exclude-drafts --limit 1             --json tagName --jq '.[0].tagName | ltrimstr("v")'
+    }
+    core="$(latest agentux-core)"
+    desktop="$(latest agentux-desktop)"
+    sha="$(gh release download "v$desktop" --repo agentux-os/agentux-desktop         --pattern "agentux-plasma-$desktop.tar.gz.sha256" --output - | cut -d' ' -f1)"
+    [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo "bad sha256 for agentux-plasma-$desktop: $sha" >&2; exit 1; }
+    sed -i         -e "s/^ARG AGENTUX_CORE_VERSION=.*/ARG AGENTUX_CORE_VERSION=$core/"         -e "s/^ARG AGENTUX_DESKTOP_VERSION=.*/ARG AGENTUX_DESKTOP_VERSION=$desktop/"         -e "s/^ARG AGENTUX_PLASMA_SHA256=.*/ARG AGENTUX_PLASMA_SHA256=$sha/"         Containerfile
+    echo "agentux-core $core, agentux-desktop $desktop (plasma sha256 $sha)"
+    git diff --stat -- Containerfile
+
 # Run bootc-image-builder (rootful) on the local image
 _bib type config:
     #!/usr/bin/env bash

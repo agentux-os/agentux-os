@@ -50,6 +50,65 @@ for cmd in git gh rg fd jq bat delta just uv node npm mise distrobox podman; do
     check "command -v $cmd"
 done
 
+echo "== AgentUX (agentux-core, agentux-desktop)"
+# Checks run as root: a description and a command, which must succeed.
+assert() {
+    local what="$1"; shift
+    local out
+    if out="$("$@" 2>&1)"; then
+        printf 'ok    %-44s %s\n' "$what" "$(head -n1 <<<"$out")"
+    else
+        printf 'FAIL  %-44s %s\n' "$what" "$out"
+        fail=1
+    fi
+}
+for bin in aux agentuxd agentux-cockpit; do
+    assert "/usr/bin/$bin" test -x "/usr/bin/$bin"
+done
+check 'aux --version'
+check 'agentuxd --version'
+assert "Plasma look-and-feel os.agentux.desktop" \
+    test -e /usr/share/plasma/look-and-feel/os.agentux.desktop/metadata.json
+assert "kdeglobals selects the AgentUX theme" \
+    grep -qx 'LookAndFeelPackage=os.agentux.desktop' /etc/xdg/kdeglobals
+assert "agentuxd enabled for all users" \
+    test -L /etc/systemd/user/default.target.wants/agentuxd.service
+assert "agentux-first-login enabled for all users" \
+    test -L /etc/systemd/user/default.target.wants/agentux-first-login.service
+
+# Start the daemon as the user, the way its user unit does, and talk to it.
+runtime_dir="$(mktemp -d)"
+chown "$user:" "$runtime_dir"
+chmod 0700 "$runtime_dir"
+sock="$runtime_dir/agentux/agentuxd.sock"
+fail_before=$fail fail=0
+as_user env XDG_RUNTIME_DIR="$runtime_dir" agentuxd </dev/null >"$runtime_dir.log" 2>&1 &
+for _ in $(seq 50); do
+    [[ -S "$sock" ]] && break
+    sleep 0.2
+done
+assert "agentuxd socket $sock" test -S "$sock"
+check "XDG_RUNTIME_DIR=$runtime_dir aux ps"
+pkill -u "$user" -x agentuxd || true
+wait || true
+if (( fail )); then
+    echo "agentuxd log:"; cat "$runtime_dir.log"
+fi
+fail=$(( fail | fail_before ))
+
+# The user manager's environment (user services, apps started by Plasma)
+# gets PATH from environment.d, not from /etc/profile.d.
+assert "/usr/lib/environment.d/60-agentux.conf" test -f /usr/lib/environment.d/60-agentux.conf
+envgen=/usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator
+if [[ -x "$envgen" ]]; then
+    user_path="$(as_user "$envgen" | sed -n 's/^PATH=//p')"
+    assert "environment.d PATH has ~/.local/bin" \
+        grep -q "^$home/.local/bin:$home/.local/share/mise/shims:" <<<"$user_path"
+    echo "      user manager PATH: $user_path"
+else
+    echo "::warning::$envgen not found; environment.d not resolved"
+fi
+
 echo "== optional ACP extras (warnings only)"
 for cmd in claude-agent-acp codex-acp agy-acp-server; do
     if as_user bash -lc "test -x \"\$(command -v $cmd)\"" </dev/null; then
