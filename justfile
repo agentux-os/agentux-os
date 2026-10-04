@@ -1,5 +1,6 @@
 # Local build and test of the AgentUX image. Needs Linux with podman;
-# `iso` and `qcow2` need sudo, `vm` needs qemu with KVM and OVMF.
+# `iso`, `qcow2` and `boot-test` need sudo; `vm` and `boot-test` need qemu with
+# KVM and OVMF.
 
 image := env("AGENTUX_IMAGE", "localhost/agentux:dev")
 bib := "quay.io/centos-bootc/bootc-image-builder:latest"
@@ -46,6 +47,13 @@ vm target="iso":
 # Run the image as a container, do a real first login and check every tool resolves (needs network)
 smoke:
     podman run --rm -v "$PWD/tests:/tests:ro,z" {{ image }} /tests/smoke.sh
+
+# Boot the local image in a headless QEMU/KVM VM and run tests/boot.sh over SSH (uses sudo; results in output/boot-test)
+boot-test: _boot-config (_bib "qcow2" "output/boot-test/config.toml")
+    tests/boot-vm.sh run output/qcow2/disk.qcow2 {{ image }} output/boot-test
+
+_boot-config:
+    tests/boot-vm.sh config output/boot-test
 
 # Run shellcheck on the scripts and hadolint on the Containerfile
 lint:
