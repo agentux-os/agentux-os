@@ -35,6 +35,30 @@ jobs:
             podman push agentux:ci "docker://${IMAGE}:${t}"
           done
 
+  # Boots nothing: runs the image as a plain container, does a real first
+  # login as a fresh user and checks every CLI resolves from a login shell.
+  # Rebuilding here is cheaper than shipping a multi-GB image between jobs
+  # as an artifact; the base layers come from quay.io's CDN either way.
+  smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Build
+        run: podman build --tag agentux:ci .
+
+      - name: First login and tool checks
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: podman run --rm --env GITHUB_TOKEN -v ./tests:/tests:ro agentux:ci /tests/smoke.sh
+
   lint:
     runs-on: ubuntu-24.04
     permissions:
@@ -43,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck
-        run: shellcheck files/usr/libexec/agentux/*
+        run: shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh
 
       - name: hadolint
         run: docker run --rm -v "$PWD:/src:ro" -w /src hadolint/hadolint:v2.15.1 hadolint Containerfile

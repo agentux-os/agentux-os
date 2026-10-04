@@ -43,9 +43,13 @@ vm target="iso":
             echo "target must be iso, disk or qcow2" >&2; exit 1 ;;
     esac
 
+# Run the image as a container, do a real first login and check every tool resolves (needs network)
+smoke:
+    podman run --rm -v "$PWD/tests:/tests:ro,z" {{ image }} /tests/smoke.sh
+
 # Run shellcheck on the scripts and hadolint on the Containerfile
 lint:
-    shellcheck files/usr/libexec/agentux/*
+    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh
     podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile
 
 # Run bootc-image-builder (rootful) on the local image

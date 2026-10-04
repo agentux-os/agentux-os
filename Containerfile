@@ -22,6 +22,7 @@ RUN dnf -y install \
         nodejs \
         npm \
         ripgrep \
+        unzip \
         uv \
     && dnf clean all
 
