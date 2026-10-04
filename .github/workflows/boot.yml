@@ -1,0 +1,126 @@
+name: Boot test
+
+# Boots the image for real: a qcow2 from bootc-image-builder in QEMU/KVM, then
+# tests/boot.sh over SSH (booted image, failed units, first login, agentuxd, a
+# fake-agents run) and an autologin into Plasma for screenshots. Not a
+# required check: it is slow and depends on the network inside the VM.
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Image to boot instead of building this ref (e.g. ghcr.io/agentux-os/agentux:latest)
+        default: ""
+  schedule:
+    - cron: "0 8 * * *" # after the nightly image build
+  pull_request:
+    paths:
+      - Containerfile
+      - files/**
+      - tests/boot*
+      - .github/workflows/boot.yml
+
+env:
+  # Scheduled runs boot the published image; everything else builds this ref.
+  IMAGE: ${{ inputs.image || (github.event_name == 'schedule' && 'ghcr.io/agentux-os/agentux:latest') || 'localhost/agentux:boot-test' }}
+  BIB: quay.io/centos-bootc/bootc-image-builder:latest
+
+jobs:
+  boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Hosted runners have KVM, but /dev/kvm is root-only until this rule
+      # (as documented by GitHub) opens it up.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+          test -w /dev/kvm
+
+      - name: Install QEMU and OVMF
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils ovmf
+
+      # The image, the builder and the disk need far more than the ~20 GB a
+      # fresh runner has free.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+            /usr/local/.ghcup /usr/local/share/powershell /usr/local/julia* \
+            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+          sudo docker image prune --all --force
+          df -h /
+
+      # bootc-image-builder runs rootful and reads the image from root's
+      # container storage, so build or pull it there.
+      - name: Build image
+        if: startsWith(env.IMAGE, 'localhost/')
+        run: sudo podman build --tag "$IMAGE" .
+
+      - name: Pull image
+        if: ${{ !startsWith(env.IMAGE, 'localhost/') }}
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | sudo podman login ghcr.io --username "${{ github.actor }}" --password-stdin
+          sudo podman pull "$IMAGE"
+
+      - name: Build qcow2
+        run: |
+          tests/boot-vm.sh config output/boot-test
+          sudo podman pull "$BIB"
+          sudo podman run --rm --privileged \
+            --security-opt label=type:unconfined_t \
+            -v ./output/boot-test/config.toml:/config.toml:ro \
+            -v ./output:/output \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            "$BIB" \
+            --type qcow2 \
+            --rootfs btrfs \
+            --use-librepo=True \
+            --chown "$(id -u):$(id -g)" \
+            "$IMAGE"
+          ls -lh output/qcow2/disk.qcow2
+          # Room for the VM's writes; the image layers are not needed anymore.
+          sudo podman rmi --all --force >/dev/null || true
+          df -h /
+
+      - name: Boot and test
+        env:
+          # Only used inside the VM to retry a first login that hit GitHub's
+          # anonymous API rate limit; it never lands in the uploaded logs.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: tests/boot-vm.sh run output/qcow2/disk.qcow2 "$IMAGE" output/boot-test
+
+      - name: Summary
+        if: always()
+        run: |
+          if [[ -f output/boot-test/summary.md ]]; then
+            cat output/boot-test/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Boot test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boot-test-${{ github.run_id }}
+          path: |
+            output/boot-test/*.png
+            output/boot-test/*.ppm
+            output/boot-test/*.log
+            output/boot-test/*.txt
+            output/boot-test/summary.md
+          retention-days: 14
+          if-no-files-found: warn

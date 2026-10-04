@@ -49,7 +49,11 @@ install_antigravity_acp() {
         | jq -er --arg a "$arch" '.agents[] | select(.id == "antigravity-acp") | .distribution.binary[$a].archive')" \
         || return 1
     dest="$data_dir/agentux/antigravity-acp"
-    tmp="$(mktemp -d)" || return 1
+    # Unpack next to the destination, not in /tmp: /tmp is a tmpfs, where the
+    # ~1 GB archive and its contents would sit in RAM (the boot test saw
+    # first-login peak at 4 GB), and the final mv becomes a rename.
+    mkdir -p "$data_dir/agentux" || return 1
+    tmp="$(mktemp -d -p "$data_dir/agentux" .antigravity-acp.XXXXXX)" || return 1
     local rc=0
     { curl -fsSL "$url" -o "$tmp/acp.zip" \
         && unzip -q "$tmp/acp.zip" -d "$tmp/out" \

@@ -3,6 +3,10 @@ Description=Install AgentUX per-user tools (agent CLIs, dev tools)
 Wants=network-online.target
 After=network-online.target
 ConditionPathExists=!%S/agentux/first-login.done
+# Only for people: a system user with a session of its own, like
+# plasma-setup running the first-boot wizard, must not download several GB of
+# agent CLIs into its tmpfs home.
+ConditionUser=!@system
 
 [Service]
 Type=oneshot
