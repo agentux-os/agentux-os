@@ -48,6 +48,44 @@ systemctl reboot
 
 Roll back with `sudo bootc rollback`.
 
+## Verifying the image
+
+Every image CI publishes is signed twice with [cosign](https://github.com/sigstore/cosign), on its digest, before `:latest` moves to it:
+
+- **keyless**, with the GitHub Actions identity of the build workflow on `main` (Fulcio certificate, recorded in the Rekor transparency log);
+- with the **AgentUX signing key**, whose public half is in this repository and in the image at [`/etc/pki/containers/agentux-os.pub`](files/etc/pki/containers/agentux-os.pub).
+
+Check either from any machine:
+
+```sh
+cosign verify ghcr.io/agentux-os/agentux:latest \
+  --certificate-identity-regexp '^https://github\.com/agentux-os/agentux-os/\.github/workflows/build\.yml@refs/heads/main$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify --key files/etc/pki/containers/agentux-os.pub ghcr.io/agentux-os/agentux:latest
+```
+
+### On installed systems
+
+An installed system checks the key signature itself on every `bootc upgrade` and `bootc switch`, because the image ships:
+
+- `/etc/containers/policy.json` with one entry added to Fedora's: `ghcr.io/agentux-os/agentux` requires a `sigstoreSigned` signature by `/etc/pki/containers/agentux-os.pub` (identity `matchRepository`, since cosign signs repositories, not tags). Every other registry keeps Fedora's rules, including the `insecureAcceptAnything` default.
+- `/etc/containers/registries.d/agentux-os.yaml`, which turns on `use-sigstore-attachments` for `ghcr.io/agentux-os` so the signature is fetched from the registry.
+
+An update that is unsigned or signed by another key is refused before any layer is downloaded, and the system stays on what it runs. The policy checks the key signature, not the keyless one: containers/image only matches Fulcio certificates by e-mail, and GitHub Actions certificates carry a workflow URI.
+
+Systems installed from an image older than the signing change have no such policy yet. Nothing special is needed: the next `sudo bootc upgrade` brings an image with the policy (that one pull is not checked), and every pull after it is. If you changed `/etc/containers/policy.json` yourself, `/etc` keeps your version on updates; check that the entry is there:
+
+```sh
+jq '.transports.docker["ghcr.io/agentux-os/agentux"]' /etc/containers/policy.json
+```
+
+and add it by hand if it is not. Do not use `bootc switch --enforce-container-sigpolicy`: it refuses any policy whose default is `insecureAcceptAnything`, which Fedora's is; the per-repository entry above is what enforces the signature.
+
+CI checks the policy the same way a system would: after signing, it runs the image's own `skopeo` with the image's own policy, registries.d and key ([`tests/sigpolicy.sh`](tests/sigpolicy.sh)) against the signed digest and tag, which must pass, against an unsigned image pushed to `ghcr.io/agentux-os/agentux:ci-unsigned`, which must be refused for lack of a signature, and against an image from another registry, which must still pass. If any of that fails, `:latest` does not move. To try the publishing path from a branch, run `gh workflow run build.yml --ref <branch>`: it pushes, signs and checks `test-<sha>` only.
+
+The signing key lives in the repository secrets `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`. Rotating it means shipping the new public key in an image signed with the old one first (a `keyPaths` list with both), then switching CI to the new key.
+
 ## Build and test locally
 
 You need Linux with Podman and [`just`](https://just.systems); `vm` also needs QEMU with KVM and OVMF.

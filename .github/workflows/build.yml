@@ -17,6 +17,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write # keyless signing with this workflow's OIDC identity
+    env:
+      # Pushes from main (push, schedule, dispatch) publish a dated tag and,
+      # once signed and verified, :latest. A dispatch from any other branch
+      # (gh workflow run build.yml --ref <branch>) pushes only test-<sha> to
+      # exercise signing and the policy, and never touches :latest.
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+      RELEASE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,13 +35,79 @@ jobs:
         run: podman build --tag agentux:ci .
 
       - name: Push
-        if: github.event_name != 'pull_request'
+        id: push
+        if: env.PUBLISH == 'true'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
-          tag="$(date -u +%Y%m%d)"
-          for t in latest "$tag"; do
-            podman push agentux:ci "docker://${IMAGE}:${t}"
-          done
+          echo "$TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
+          # cosign reads Docker's credential file, not Podman's.
+          echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          if [ "$RELEASE" = true ]; then
+            tag="$(date -u +%Y%m%d)"
+          else
+            tag="test-${GITHUB_SHA::12}"
+          fi
+          podman push --digestfile "$RUNNER_TEMP/digest" agentux:ci "docker://${IMAGE}:${tag}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "digest=$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_OUTPUT"
+
+      - uses: sigstore/cosign-installer@v4.1.2
+        if: env.PUBLISH == 'true'
+
+      # Two signatures on the same digest, both in the classic .sig tag that
+      # containers/image reads (hence no new bundle format): a keyless one,
+      # tied to this workflow by Fulcio and Rekor, for `cosign verify`; and
+      # one with the AgentUX key, the only kind the policy installed systems
+      # enforce can check.
+      - name: Sign
+        if: env.PUBLISH == 'true'
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          if [ -z "$COSIGN_PRIVATE_KEY" ]; then
+            echo "::error::the COSIGN_PRIVATE_KEY secret is not set; installed systems would refuse this image"
+            exit 1
+          fi
+          legacy=(--new-bundle-format=false --use-signing-config=false)
+          cosign sign --yes "${legacy[@]}" "$REF"
+          cosign sign --yes "${legacy[@]}" --key env://COSIGN_PRIVATE_KEY "$REF"
+
+      - name: Verify with cosign
+        if: env.PUBLISH == 'true'
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          IDENTITY: https://github.com/${{ github.workflow_ref }}
+        run: |
+          cosign verify --key files/etc/pki/containers/agentux-os.pub "$REF" > /dev/null
+          cosign verify "$REF" \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+
+      # The check that matters: what an installed system's `bootc upgrade`
+      # would do with the policy shipped in this very image. An unsigned image
+      # in the same repository must be refused.
+      - name: Verify with the shipped policy
+        if: env.PUBLISH == 'true'
+        env:
+          AUTHFILE: ${{ runner.temp }}/auth.json
+          WORKDIR: /mnt/sigpolicy
+        run: |
+          cp "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/containers/auth.json" "$AUTHFILE"
+          sudo install -d -o "$(id -u)" -g "$(id -g)" "$WORKDIR"
+          skopeo copy --quiet docker://quay.io/libpod/alpine:latest "docker://${IMAGE}:ci-unsigned"
+          tests/sigpolicy.sh agentux:ci "$IMAGE" "${{ steps.push.outputs.digest }}" \
+            "${{ steps.push.outputs.tag }}" ci-unsigned
+
+      - name: Tag latest
+        if: env.RELEASE == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          skopeo copy --quiet --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:latest"
+          test "$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:latest")" = "$DIGEST"
 
   # Boots nothing: runs the image as a plain container, does a real first
   # login as a fresh user and checks every CLI resolves from a login shell.
