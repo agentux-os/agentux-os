@@ -125,7 +125,11 @@ check_system_users() {
     local uid_min unit uids u
     uid_min="$(awk '$1 == "UID_MIN" {print $2}' /etc/login.defs)"
     for unit in agentux-first-login.service agentuxd.service 'app-agentux\x2dcockpit@autostart.service'; do
-        uids="$(sudo journalctl -b -o json USER_UNIT="$unit" | jq -r '._UID' | sort -un | tr '\n' ' ')"
+        # Only "Starting/Started" count; a manager whose condition check
+        # skipped the unit logs that under USER_UNIT too.
+        uids="$(sudo journalctl -b -o json USER_UNIT="$unit" \
+            | jq -r 'select((.MESSAGE | type) == "string" and (.MESSAGE | startswith("Start"))) | ._UID' \
+            | sort -un | tr '\n' ' ')"
         uids="${uids% }"
         local system_uids=()
         for u in $uids; do
