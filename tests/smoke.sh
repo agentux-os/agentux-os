@@ -136,6 +136,23 @@ assert "Plasma look-and-feel os.agentux.desktop" \
     test -e /usr/share/plasma/look-and-feel/os.agentux.desktop/metadata.json
 assert "kdeglobals selects the AgentUX theme" \
     grep -qx 'LookAndFeelPackage=os.agentux.desktop' /etc/xdg/kdeglobals
+# The system calls itself AgentUX but keeps Fedora's ID and version fields
+# (see the Containerfile). The inner bash expands the variables.
+# shellcheck disable=SC2016
+assert "os-release NAME=AgentUX, VARIANT_ID=agentux, LOGO=agentux" \
+    bash -c '. /etc/os-release && [[ $NAME == AgentUX && $VARIANT_ID == agentux && $LOGO == agentux && $PRETTY_NAME == "AgentUX "* ]] && echo "$PRETTY_NAME"'
+# shellcheck disable=SC2016
+assert "os-release ID=fedora" bash -c '. /etc/os-release && test "$ID" = fedora'
+# The kept fields as the base image had them (the Containerfile saves its
+# os-release); one the base lacks, like Fedora 44's PLATFORM_ID, stays absent.
+for key in ID VERSION_ID PLATFORM_ID CPE_NAME SUPPORT_END; do
+    assert "os-release $key as in the base image" \
+        bash -c "test \"\$(grep '^$key=' /etc/os-release)\" = \"\$(grep '^$key=' /usr/share/agentux/os-release.base)\" && { grep '^$key=' /etc/os-release || echo '(not set in either)'; }"
+done
+assert "agentux icon in hicolor and pixmaps" \
+    test -f /usr/share/icons/hicolor/scalable/apps/agentux.svg -a -f /usr/share/icons/hicolor/256x256/apps/agentux.png -a -f /usr/share/pixmaps/agentux.png
+assert "kcm-about-distrorc uses the AgentUX logo" \
+    grep -qx 'LogoPath=/usr/share/icons/hicolor/256x256/apps/agentux.png' /etc/xdg/kcm-about-distrorc
 assert "agentuxd enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentuxd.service
 assert "agentux-first-login enabled for all users" \

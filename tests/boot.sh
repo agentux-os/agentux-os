@@ -1,7 +1,8 @@
 #!/usr/bin/bash
 # Boot test checks, run inside a booted AgentUX VM as the test user (over SSH,
 # with passwordless sudo) by tests/boot-vm.sh:
-#   boot.sh system   the booted image, system and user units, the boot
+#   boot.sh system   the booted image, its os-release identity (AgentUX),
+#                    system and user units, the boot
 #                    splash (theme, initramfs, rhgb), the first-boot
 #                    wizard's session, first login, agentuxd, an end-to-end
 #                    run with fake agents and one with checks in rootless
@@ -126,6 +127,30 @@ check_splash() {
     else
         bad "kernel command line has no rhgb: $(cat /proc/cmdline)"
     fi
+}
+
+# The system calls itself AgentUX but stays Fedora 44 to tools that key on
+# ID/VERSION_ID (see the Containerfile); hostnamectl reads os-release through
+# systemd, as Plasma's wizard and About this System do.
+check_os_release() {
+    echo "== os-release"
+    local f=/etc/os-release
+    indent <"$f"
+    assert "NAME=AgentUX" bash -c ". $f && test \"\$NAME\" = AgentUX"
+    assert "PRETTY_NAME starts with AgentUX" bash -c ". $f && [[ \$PRETTY_NAME == 'AgentUX '* ]] && echo \"\$PRETTY_NAME\""
+    assert "VARIANT_ID=agentux, IMAGE_ID=agentux" bash -c ". $f && test \"\$VARIANT_ID\" = agentux && test \"\$IMAGE_ID\" = agentux"
+    assert "LOGO=agentux, an icon in hicolor" bash -c ". $f && test \"\$LOGO\" = agentux && test -f /usr/share/icons/hicolor/scalable/apps/agentux.svg"
+    assert "ID=fedora" bash -c ". $f && test \"\$ID\" = fedora"
+    # The kept fields as the base image had them (a field it lacks, like
+    # Fedora 44's PLATFORM_ID, must stay absent).
+    local base=/usr/share/agentux/os-release.base key
+    for key in ID VERSION_ID PLATFORM_ID CPE_NAME SUPPORT_END; do
+        assert "$key as in the base image" \
+            bash -c "test \"\$(grep '^$key=' $f)\" = \"\$(grep '^$key=' $base)\" && { grep '^$key=' $f || echo '(not set in either)'; }"
+    done
+    assert "hostnamectl reports AgentUX" bash -c "hostnamectl --json=short | jq -er '.OperatingSystemPrettyName | select(startswith(\"AgentUX \"))'"
+    assert "kcm-about-distrorc points at the AgentUX logo" \
+        grep -qx 'LogoPath=/usr/share/icons/hicolor/256x256/apps/agentux.png' /etc/xdg/kcm-about-distrorc
 }
 
 check_system() {
@@ -736,6 +761,7 @@ check_desktop() {
 case "$phase" in
     system)
         check_image
+        check_os_release
         check_system
         check_splash
         check_first_login

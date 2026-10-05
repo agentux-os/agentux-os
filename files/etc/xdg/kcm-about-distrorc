@@ -1,0 +1,9 @@
+# KDE "About this System" (kinfocenter). Name, version, variant and website
+# come from /usr/lib/os-release (AgentUX's, see the Containerfile); this file
+# replaces Fedora's (kde-settings), which pointed the logo at Fedora's.
+# UseOSReleaseVersion shows VERSION ("<date> (Fedora Linux 44 base)") rather
+# than VERSION_ID (44, Fedora's release, which is not AgentUX's version).
+[General]
+LogoPath=/usr/share/icons/hicolor/256x256/apps/agentux.png
+Website=https://github.com/agentux-os/agentux
+UseOSReleaseVersion=true
