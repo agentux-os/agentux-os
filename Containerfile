@@ -1,8 +1,17 @@
 # AgentUX image: Fedora Kinoite (KDE Plasma, Wayland) as a bootc image.
 # See ADR 0001 in agentux-os/agentux.
 
+#
+# One Containerfile, two images: VARIANT=plasma (the default) is
+# ghcr.io/agentux-os/agentux; VARIANT=hyprland is
+# ghcr.io/agentux-os/agentux-hyprland, the same system plus a Hyprland
+# session that the login screen preselects (see the Hyprland step below).
+
 ARG FEDORA_VERSION=44
 FROM quay.io/fedora/fedora-kinoite:${FEDORA_VERSION}
+
+ARG VARIANT=plasma
+RUN case "$VARIANT" in plasma|hyprland) ;; *) echo "VARIANT must be plasma or hyprland, not '$VARIANT'" >&2; exit 1 ;; esac
 
 # mise is not in the Fedora repos; use its official RPM repository.
 RUN curl -fsSL https://mise.jdx.dev/rpm/mise.repo -o /etc/yum.repos.d/mise.repo
@@ -56,6 +65,59 @@ RUN arch="$(uname -m)" \
 
 COPY files/ /
 
+# The hyprland variant: Hyprland next to Plasma, as a second session that the
+# login screen preselects. Plasma, the cockpit and everything else are the
+# same as in the default image, so both sessions work and users can pick
+# either at the login screen. Fedora 44 has no hyprland package; the
+# sdegler/hyprland COPR (the one Fedora's Hyprland wiki points to) builds the
+# Hyprland stack for Fedora 44 on x86_64 and aarch64. Its repository is left
+# disabled afterwards, so `rpm-ostree install` on a system never pulls from
+# it unasked. Waybar, fuzzel, mako, foot and the rest come from Fedora. Weak
+# dependencies are off: they would add kitty, wofi, nwg-panel and uwsm, which
+# nothing here uses. variants/hyprland/ holds the session (its Exec seeds ~/.config from
+# /usr/share/agentux/hyprland/user/ when the user has no configuration of
+# their own) and the AgentUX defaults; it is bind-mounted, so the plasma
+# image carries none of it. The build fails if the defaults stop parsing.
+RUN --mount=type=bind,source=variants,target=/tmp/variants \
+    if [ "$VARIANT" != hyprland ]; then exit 0; fi \
+    && copr=/etc/yum.repos.d/_copr_sdegler-hyprland.repo \
+    && fedora="$(rpm -E %fedora)" \
+    && curl -fsSL "https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/repo/fedora-$fedora/sdegler-hyprland-fedora-$fedora.repo" -o "$copr" \
+    && dnf -y install --setopt=install_weak_deps=False \
+        brightnessctl \
+        cliphist \
+        foot \
+        fuzzel \
+        grim \
+        hypridle \
+        hyprland \
+        hyprland-guiutils \
+        hyprland-qt-support \
+        hyprlock \
+        hyprpolkitagent \
+        mako \
+        network-manager-applet \
+        playerctl \
+        slurp \
+        swaybg \
+        waybar \
+        wl-clipboard \
+        xdg-desktop-portal-hyprland \
+    && dnf clean all \
+    && sed -i 's/^enabled=1/enabled=0/' "$copr" \
+    && cp -a /tmp/variants/hyprland/. / \
+    && chmod 0755 /usr/libexec/agentux/hyprland-* \
+    && test -x /usr/bin/start-hyprland \
+    && test -f /usr/share/agentux/hyprland/wallpaper.png \
+    && grep -qx 'Exec=/usr/libexec/agentux/hyprland-session' /usr/share/wayland-sessions/agentux-hyprland.desktop \
+    && runtime="$(mktemp -d)" \
+    && { XDG_RUNTIME_DIR="$runtime" Hyprland --i-am-really-stupid --verify-config \
+        --config /usr/share/agentux/hyprland/user/hypr/hyprland.conf > /tmp/hyprland-verify.txt 2>&1 || true; } \
+    && { grep -qx 'config ok' /tmp/hyprland-verify.txt || { cat /tmp/hyprland-verify.txt >&2; false; }; } \
+    && rm -rf "$runtime" /tmp/hyprland-verify.txt \
+    && foot --check-config --config /usr/share/agentux/hyprland/user/foot/foot.ini \
+    && jq empty /usr/share/agentux/hyprland/user/waybar/config.jsonc
+
 # Identity: the system calls itself AgentUX (os-release NAME is what the
 # first-boot wizard's "Powered by", the boot menu, hostnamectl and KDE's About
 # this System show), the way Universal Blue images rename Kinoite/Silverblue.
@@ -87,9 +149,13 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y%m%d)}" \
     && set_field NAME "AgentUX" \
     && set_field VERSION "$version (Fedora Linux $fedora base)" \
     && set_field PRETTY_NAME "AgentUX $version (Fedora Linux $fedora base)" \
-    && set_field VARIANT "Plasma" \
-    && set_field VARIANT_ID "agentux" \
-    && set_field IMAGE_ID "agentux" \
+    && case "$VARIANT" in \
+        hyprland) image=agentux-hyprland variant=Hyprland ;; \
+        *) image=agentux variant=Plasma ;; \
+    esac \
+    && set_field VARIANT "$variant" \
+    && set_field VARIANT_ID "$image" \
+    && set_field IMAGE_ID "$image" \
     && set_field IMAGE_VERSION "$version" \
     && set_field LOGO "agentux" \
     && set_field ANSI_COLOR "0;38;2;198;243;107" \
@@ -136,14 +202,16 @@ RUN dnf -y install plymouth-plugin-script \
 
 # Updates of this image (bootc upgrade/switch pull through containers/image)
 # must carry a cosign signature from the AgentUX key shipped in files/. Only
-# this repository gets the requirement: Fedora's policy for everything else,
-# including its insecureAcceptAnything default, is kept as is. The policy
-# can't check keyless (Fulcio) signatures from GitHub Actions, since it only
-# matches e-mail identities; CI signs both ways (see build.yml).
+# AgentUX's repositories get the requirement, both variants' in both images,
+# so a `bootc switch` from one variant to the other is checked too: Fedora's
+# policy for everything else, including its insecureAcceptAnything default,
+# is kept as is. The policy can't check keyless (Fulcio) signatures from
+# GitHub Actions, since it only matches e-mail identities; CI signs both ways
+# (see build.yml).
 RUN jq --arg key /etc/pki/containers/agentux-os.pub \
-        '.transports.docker["ghcr.io/agentux-os/agentux"] = [{"type": "sigstoreSigned", "keyPath": $key, "signedIdentity": {"type": "matchRepository"}}]' \
+        '[{"type": "sigstoreSigned", "keyPath": $key, "signedIdentity": {"type": "matchRepository"}}] as $signed | .transports.docker["ghcr.io/agentux-os/agentux"] = $signed | .transports.docker["ghcr.io/agentux-os/agentux-hyprland"] = $signed' \
         /etc/containers/policy.json > /tmp/policy.json \
-    && jq -e '.default and .transports.docker["ghcr.io/agentux-os/agentux"]' /tmp/policy.json > /dev/null \
+    && jq -e '.default and .transports.docker["ghcr.io/agentux-os/agentux"] and .transports.docker["ghcr.io/agentux-os/agentux-hyprland"]' /tmp/policy.json > /dev/null \
     && cat /tmp/policy.json > /etc/containers/policy.json \
     && rm /tmp/policy.json
 
@@ -164,6 +232,7 @@ LABEL org.opencontainers.image.title="AgentUX" \
       org.opencontainers.image.description="The Linux distribution where every coding agent works as one team" \
       org.opencontainers.image.source="https://github.com/agentux-os/agentux-os" \
       org.opencontainers.image.licenses="Apache-2.0" \
+      io.github.agentux-os.variant="${VARIANT}" \
       containers.bootc="1"
 
 RUN bootc container lint

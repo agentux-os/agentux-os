@@ -5,8 +5,18 @@
 # network), bounded by its unit's TimeoutStartSec, and checks that every tool
 # resolves from a clean login shell. Then installs Antigravity's ACP server
 # the way its own unit does (warnings only). Step timings go to the log and,
-# if SMOKE_SUMMARY names a file, to it as Markdown.
+# if SMOKE_SUMMARY names a file, to it as Markdown. SMOKE_VARIANT (plasma or
+# hyprland) is the image variant expected; the hyprland one
+# also gets its Hyprland session and defaults checked.
 set -euo pipefail
+
+# Without SMOKE_VARIANT (`just smoke`), the image's own os-release says which.
+variant="${SMOKE_VARIANT:-$(grep -qxE 'VARIANT_ID="?agentux-hyprland"?' /etc/os-release && echo hyprland || echo plasma)}"
+case "$variant" in
+    plasma) image_id=agentux ;;
+    hyprland) image_id=agentux-hyprland ;;
+    *) echo "SMOKE_VARIANT must be plasma or hyprland" >&2; exit 2 ;;
+esac
 
 user=agentux-smoke
 home=/var/home/$user
@@ -139,8 +149,8 @@ assert "kdeglobals selects the AgentUX theme" \
 # The system calls itself AgentUX but keeps Fedora's ID and version fields
 # (see the Containerfile). The inner bash expands the variables.
 # shellcheck disable=SC2016
-assert "os-release NAME=AgentUX, VARIANT_ID=agentux, LOGO=agentux" \
-    bash -c '. /etc/os-release && [[ $NAME == AgentUX && $VARIANT_ID == agentux && $LOGO == agentux && $PRETTY_NAME == "AgentUX "* ]] && echo "$PRETTY_NAME"'
+assert "os-release NAME=AgentUX, VARIANT_ID=IMAGE_ID=$image_id, LOGO=agentux" \
+    env image_id="$image_id" bash -c '. /etc/os-release && [[ $NAME == AgentUX && $VARIANT_ID == "$image_id" && $IMAGE_ID == "$image_id" && $LOGO == agentux && $PRETTY_NAME == "AgentUX "* ]] && echo "$PRETTY_NAME"'
 # shellcheck disable=SC2016
 assert "os-release ID=fedora" bash -c '. /etc/os-release && test "$ID" = fedora'
 # The kept fields as the base image had them (the Containerfile saves its
@@ -159,6 +169,46 @@ assert "agentux-first-login enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentux-first-login.service
 assert "agentux-antigravity-acp enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentux-antigravity-acp.service
+
+# The hyprland variant: Hyprland as a second session, preselected on the
+# login screen, and the AgentUX defaults seeded into a fresh user's ~/.config
+# the way the session does it, which must parse. The plasma image has none of
+# it.
+hypr_session=/usr/share/wayland-sessions/agentux-hyprland.desktop
+if [[ "$variant" == hyprland ]]; then
+    echo "== Hyprland (agentux-hyprland)"
+    for bin in Hyprland start-hyprland hyprctl hyprlock hypridle waybar fuzzel mako foot swaybg wl-copy cliphist grim slurp nm-applet; do
+        assert "$bin" command -v "$bin"
+    done
+    assert "hyprpolkitagent user unit" test -f /usr/lib/systemd/user/hyprpolkitagent.service
+    assert "xdg-desktop-portal-hyprland" test -f /usr/share/xdg-desktop-portal/hyprland-portals.conf
+    assert "session $hypr_session runs hyprland-session" \
+        grep -qx 'Exec=/usr/libexec/agentux/hyprland-session' "$hypr_session"
+    assert "plasma.desktop still installed" test -f /usr/share/wayland-sessions/plasma.desktop
+    assert "login screen preselects agentux-hyprland.desktop" \
+        grep -qx 'PreselectedSession=agentux-hyprland.desktop' /usr/lib/plasmalogin/plasmalogin.conf.d/60-agentux-hyprland.conf
+    assert "COPR repository disabled" \
+        bash -c '! grep -qx "enabled=1" /etc/yum.repos.d/_copr_sdegler-hyprland.repo'
+    assert "seed ~/.config (hyprland-defaults)" as_user /usr/libexec/agentux/hyprland-defaults
+    for f in hypr/hyprland.conf hypr/hyprlock.conf hypr/hypridle.conf waybar/config.jsonc waybar/style.css mako/config fuzzel/fuzzel.ini foot/foot.ini; do
+        assert "seeded .config/$f" test -f "$home/.config/$f"
+    done
+    # A second run keeps what is there.
+    echo '# mine' >>"$home/.config/foot/foot.ini"
+    assert "hyprland-defaults again" as_user /usr/libexec/agentux/hyprland-defaults
+    assert "hyprland-defaults kept the user's foot.ini" \
+        bash -c "tail -n1 '$home/.config/foot/foot.ini' | grep -qx '# mine'"
+    hypr_runtime="$(mktemp -d)"
+    chown "$user:" "$hypr_runtime"
+    chmod 0700 "$hypr_runtime"
+    assert "Hyprland --verify-config on the seeded hyprland.conf" \
+        bash -c "runuser -u '$user' -- env HOME='$home' XDG_RUNTIME_DIR='$hypr_runtime' Hyprland --verify-config --config '$home/.config/hypr/hyprland.conf' 2>&1 | tee /dev/stderr | grep -qx 'config ok'"
+    assert "foot --check-config on the seeded foot.ini" \
+        as_user foot --check-config --config "$home/.config/foot/foot.ini"
+    rm -rf "$hypr_runtime"
+else
+    assert "no Hyprland session in the plasma image" test ! -e "$hypr_session"
+fi
 
 # Start the daemon as the user, the way its user unit does, and talk to it.
 runtime_dir="$(mktemp -d)"

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=AgentUX Hyprland
+Comment=Hyprland, tiled for watching several agents, with the AgentUX defaults
+Exec=/usr/libexec/agentux/hyprland-session
+TryExec=/usr/bin/start-hyprland
+DesktopNames=Hyprland
+Keywords=tiling;wayland;compositor;agentux;

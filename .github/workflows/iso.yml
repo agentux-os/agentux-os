@@ -3,9 +3,14 @@ name: Build ISO
 on:
   workflow_dispatch:
     inputs:
+      variant:
+        description: Image variant to build the installer from (plasma is ghcr.io/agentux-os/agentux, hyprland is ghcr.io/agentux-os/agentux-hyprland)
+        type: choice
+        options: [plasma, hyprland]
+        default: plasma
       image:
-        description: Image to build the installer from
-        default: ghcr.io/agentux-os/agentux:latest
+        description: Image to build the installer from instead of the variant's :latest (e.g. a test-<sha> tag)
+        default: ""
   push:
     tags: ["v*"]
   # Check that the installer still builds when its definition changes.
@@ -15,7 +20,9 @@ on:
       - disk_config/iso.toml
 
 env:
-  IMAGE: ${{ inputs.image || 'ghcr.io/agentux-os/agentux:latest' }}
+  IMAGE: ${{ inputs.image || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
+  # The ISO's file name: agentux-<date>-<arch> or agentux-hyprland-<date>-<arch>.
+  ISO_PREFIX: ${{ inputs.variant == 'hyprland' && 'agentux-hyprland' || 'agentux' }}
   BIB: quay.io/centos-bootc/bootc-image-builder:latest
 
 jobs:
@@ -106,7 +113,7 @@ jobs:
         if: steps.arch.outputs.ok == 'true'
         id: iso
         run: |
-          name="agentux-$(date -u +%Y%m%d)-${{ matrix.arch }}"
+          name="${ISO_PREFIX}-$(date -u +%Y%m%d)-${{ matrix.arch }}"
           mv output/bootiso/install.iso "$name.iso"
           sha256sum "$name.iso" > "$name.iso.sha256"
           ls -lh "$name.iso"

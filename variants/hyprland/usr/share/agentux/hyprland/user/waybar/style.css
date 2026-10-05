@@ -1,0 +1,59 @@
+/* Waybar in the AgentUX colours: Ink bar, Mist text, Lime for what is active. */
+* {
+    font-family: "Noto Sans", sans-serif;
+    font-size: 13px;
+    min-height: 0;
+}
+
+window#waybar {
+    background: #0b0d10;
+    color: #e7eaef;
+    border-bottom: 1px solid #171b20;
+}
+
+#custom-agentux {
+    font-family: monospace;
+    font-weight: bold;
+    color: #0b0d10;
+    background: #c6f36b;
+    padding: 0 10px;
+    margin: 4px 0 4px 6px;
+    border-radius: 4px;
+}
+
+#workspaces button {
+    color: #949dab;
+    padding: 0 8px;
+    border-radius: 4px;
+}
+
+#workspaces button.active {
+    color: #0b0d10;
+    background: #c6f36b;
+}
+
+#workspaces button.urgent {
+    color: #e5484d;
+}
+
+#window {
+    color: #949dab;
+}
+
+#clock {
+    font-family: monospace;
+}
+
+#cpu, #memory, #network, #pulseaudio, #battery, #tray {
+    font-family: monospace;
+    color: #e7eaef;
+    padding: 0 8px;
+}
+
+#battery.warning {
+    color: #f5a524;
+}
+
+#battery.critical, #network.disconnected {
+    color: #e5484d;
+}
