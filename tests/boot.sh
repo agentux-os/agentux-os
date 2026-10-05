@@ -140,8 +140,14 @@ check_os_release() {
     assert "PRETTY_NAME starts with AgentUX" bash -c ". $f && [[ \$PRETTY_NAME == 'AgentUX '* ]] && echo \"\$PRETTY_NAME\""
     assert "VARIANT_ID=agentux, IMAGE_ID=agentux" bash -c ". $f && test \"\$VARIANT_ID\" = agentux && test \"\$IMAGE_ID\" = agentux"
     assert "LOGO=agentux, an icon in hicolor" bash -c ". $f && test \"\$LOGO\" = agentux && test -f /usr/share/icons/hicolor/scalable/apps/agentux.svg"
-    assert "ID=fedora, VERSION_ID, PLATFORM_ID and CPE_NAME are Fedora's" \
-        bash -c ". $f && test \"\$ID\" = fedora && [[ \$VERSION_ID =~ ^[0-9]+\$ && \$PLATFORM_ID == platform:f\$VERSION_ID && \$CPE_NAME == cpe:/o:fedoraproject:fedora:\$VERSION_ID ]]"
+    assert "ID=fedora" bash -c ". $f && test \"\$ID\" = fedora"
+    # The kept fields as the base image had them (a field it lacks, like
+    # Fedora 44's PLATFORM_ID, must stay absent).
+    local base=/usr/share/agentux/os-release.base key
+    for key in ID VERSION_ID PLATFORM_ID CPE_NAME SUPPORT_END; do
+        assert "$key as in the base image" \
+            bash -c "test \"\$(grep '^$key=' $f)\" = \"\$(grep '^$key=' $base)\" && { grep '^$key=' $f || echo '(not set in either)'; }"
+    done
     assert "hostnamectl reports AgentUX" bash -c "hostnamectl --json=short | jq -er '.OperatingSystemPrettyName | select(startswith(\"AgentUX \"))'"
     assert "kcm-about-distrorc points at the AgentUX logo" \
         grep -qx 'LogoPath=/usr/share/icons/hicolor/256x256/apps/agentux.png' /etc/xdg/kcm-about-distrorc

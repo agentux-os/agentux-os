@@ -59,8 +59,9 @@ COPY files/ /
 # Identity: the system calls itself AgentUX (os-release NAME is what the
 # first-boot wizard's "Powered by", the boot menu, hostnamectl and KDE's About
 # this System show), the way Universal Blue images rename Kinoite/Silverblue.
-# Unlike them, ID stays fedora, with VERSION_ID, PLATFORM_ID, CPE_NAME and
-# SUPPORT_END unchanged: bootc-image-builder picks its Fedora 44 definitions
+# Unlike them, ID stays fedora, with VERSION_ID, CPE_NAME, SUPPORT_END (and
+# PLATFORM_ID, should the base set it again; Fedora 44's has none) as the
+# base image has them: bootc-image-builder picks its Fedora 44 definitions
 # by ID/VERSION_ID, dnf5 resolves $releasever from VERSION_ID, toolbox picks
 # fedora-toolbox:<VERSION_ID> by ID, and scanners map CPE_NAME to Fedora's
 # advisories; all of that is still true of this system. (Fedora sets no
@@ -69,11 +70,15 @@ COPY files/ /
 # fields for image-based systems; the version is the build date (the dated
 # tag's), or AGENTUX_VERSION if given. LOGO names the brand icon installed in
 # hicolor and /usr/share/pixmaps by files/. /etc/os-release is a symlink here.
+# The base image's os-release is kept as /usr/share/agentux/os-release.base,
+# so the smoke and boot tests check the kept fields against the real values.
 ARG AGENTUX_VERSION=""
 RUN version="${AGENTUX_VERSION:-$(date -u +%Y%m%d)}" \
     && fedora="$(. /usr/lib/os-release && test "$ID" = fedora && echo "$VERSION_ID")" \
     && test -n "$fedora" \
-    && cp /usr/lib/os-release /tmp/os-release.fedora \
+    && base=/usr/share/agentux/os-release.base \
+    && mkdir -p /usr/share/agentux \
+    && cp /usr/lib/os-release "$base" \
     && set_field() { \
         awk -v k="$1" -v v="$2" \
             'index($0, k "=") == 1 { if (!done) print k "=\"" v "\""; done = 1; next } { print } END { if (!done) print k "=\"" v "\"" }' \
@@ -97,9 +102,8 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y%m%d)}" \
     && rm /tmp/os-release \
     && test "$(readlink -f /etc/os-release)" = /usr/lib/os-release \
     && for key in ID VERSION_ID PLATFORM_ID CPE_NAME SUPPORT_END; do \
-        test "$(grep "^$key=" /usr/lib/os-release)" = "$(grep "^$key=" /tmp/os-release.fedora)" || exit 1; \
+        test "$(grep "^$key=" /usr/lib/os-release)" = "$(grep "^$key=" "$base")" || exit 1; \
     done \
-    && rm /tmp/os-release.fedora \
     && (. /usr/lib/os-release && test "$NAME" = AgentUX && test "$ID" = fedora && test "$LOGO" = agentux) \
     && test -f /usr/share/icons/hicolor/scalable/apps/agentux.svg \
     && gtk-update-icon-cache --force --quiet /usr/share/icons/hicolor \
