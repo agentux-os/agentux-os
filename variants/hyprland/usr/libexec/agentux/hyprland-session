@@ -1,0 +1,8 @@
+#!/usr/bin/bash
+# Exec= of the "AgentUX Hyprland" login session
+# (/usr/share/wayland-sessions/agentux-hyprland.desktop): seeds the AgentUX
+# Hyprland configuration if the user has none, then starts Hyprland through
+# its own launcher (start-hyprland, which restarts it in safe mode if it
+# crashes). A failed seed never keeps the user from logging in.
+/usr/libexec/agentux/hyprland-defaults || echo "agentux: seeding the Hyprland configuration failed" >&2
+exec /usr/bin/start-hyprland "$@"

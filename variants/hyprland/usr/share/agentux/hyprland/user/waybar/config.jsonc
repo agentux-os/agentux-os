@@ -1,0 +1,52 @@
+{
+    "layer": "top",
+    "position": "top",
+    "height": 30,
+    "spacing": 6,
+    "modules-left": ["custom/agentux", "hyprland/workspaces", "hyprland/window"],
+    "modules-center": ["clock"],
+    "modules-right": ["cpu", "memory", "network", "pulseaudio", "battery", "tray"],
+    "custom/agentux": {
+        "format": "AgentUX",
+        "tooltip-format": "Open the AgentUX cockpit (Super+A)",
+        "on-click": "/usr/libexec/agentux/hyprland-cockpit"
+    },
+    "hyprland/workspaces": {
+        "format": "{id}",
+        "on-click": "activate"
+    },
+    "hyprland/window": {
+        "max-length": 80,
+        "separate-outputs": true
+    },
+    "clock": {
+        "format": "{:%a %d %b  %H:%M}",
+        "tooltip-format": "{:%Y-%m-%d %H:%M:%S}"
+    },
+    "cpu": {
+        "format": "cpu {usage}%",
+        "interval": 5
+    },
+    "memory": {
+        "format": "mem {percentage}%",
+        "interval": 10
+    },
+    "network": {
+        "format-wifi": "wifi {essid}",
+        "format-ethernet": "net",
+        "format-disconnected": "offline",
+        "tooltip-format": "{ifname} {ipaddr}"
+    },
+    "pulseaudio": {
+        "format": "vol {volume}%",
+        "format-muted": "muted",
+        "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+    },
+    "battery": {
+        "format": "bat {capacity}%",
+        "states": {"warning": 20, "critical": 10}
+    },
+    "tray": {
+        "spacing": 8
+    }
+}

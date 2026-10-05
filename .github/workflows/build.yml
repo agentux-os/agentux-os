@@ -8,8 +8,11 @@ on:
     - cron: "0 6 * * *" # daily, to pick up Fedora updates
   workflow_dispatch:
 
+# Two images from the one Containerfile (build arg VARIANT): plasma is
+# ghcr.io/<owner>/agentux, hyprland is ghcr.io/<owner>/agentux-hyprland. Each
+# job below runs once per variant (and architecture), with IMAGE set to that
+# variant's repository; both are published, signed and checked the same way.
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/agentux
   # Pushes from main (push, schedule, dispatch) publish a dated tag and,
   # once signed and verified, :latest. A dispatch from any other branch
   # (gh workflow run build.yml --ref <branch>) pushes only test-<sha> (and
@@ -24,19 +27,27 @@ jobs:
   # image under a staging tag (ci-staging-<arch> from main, test-<sha>-<arch>
   # otherwise) and hands its digest to `publish`, which only works by digest.
   image:
-    name: image (${{ matrix.arch }})
+    name: image (${{ matrix.variant }}, ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
+        variant: [plasma, hyprland]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
+          - variant: plasma
+            image: agentux
+          - variant: hyprland
+            image: agentux-hyprland
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +56,7 @@ jobs:
 
       - name: Build
         run: |
-          podman build --tag agentux:ci .
+          podman build --build-arg VARIANT=${{ matrix.variant }} --tag agentux:ci .
           test "$(podman image inspect --format '{{.Architecture}}' agentux:ci)" = "${{ matrix.arch }}"
 
       - name: Push
@@ -63,7 +74,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: env.PUBLISH == 'true'
         with:
-          name: digest-${{ matrix.arch }}
+          name: digest-${{ matrix.variant }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/${{ matrix.arch }}
           retention-days: 1
           overwrite: true
@@ -74,18 +85,29 @@ jobs:
   # policy the image ships (for each architecture), and only then moves the
   # public tags to the list, digest unchanged.
   publish:
+    name: publish (${{ matrix.variant }})
     needs: image
     if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: plasma
+            image: agentux
+          - variant: hyprland
+            image: agentux-hyprland
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # Main's runs share the ci-staging tags; one at a time.
+    # Main's runs share the ci-staging tags; one at a time per repository.
     concurrency:
-      group: publish-${{ github.ref }}
+      group: publish-${{ github.ref }}-${{ matrix.variant }}
       cancel-in-progress: false
     permissions:
       contents: read
       packages: write
       id-token: write # keyless signing with this workflow's OIDC identity
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -101,7 +123,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: digest-*
+          pattern: digest-${{ matrix.variant }}-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
 
@@ -219,7 +241,7 @@ jobs:
           ARM64: ${{ steps.list.outputs.arm64 }}
         run: |
           {
-            echo "## Published"
+            echo "## Published \`${IMAGE}\`"
             echo
             echo "| | Digest |"
             echo "|---|---|"
@@ -228,9 +250,10 @@ jobs:
             echo "| linux/arm64 | \`${ARM64}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The required check. A matrix job's checks are named "image (amd64)" and
-  # so on, so this one carries the name branch protection asks for: every
-  # architecture built and, outside pull requests, the list published.
+  # The required check. A matrix job's checks are named "image (plasma,
+  # amd64)" and so on, so this one carries the name branch protection asks
+  # for: every variant built for every architecture and, outside pull
+  # requests, both lists published.
   build:
     needs: [image, publish]
     if: always()
@@ -256,11 +279,13 @@ jobs:
   # multi-GB image between jobs as an artifact; the base layers come from
   # quay.io's CDN either way.
   smoke:
-    name: smoke (${{ matrix.arch }})
+    name: smoke (${{ matrix.variant }}, ${{ matrix.arch }})
     needs: image
     strategy:
       fail-fast: false
       matrix:
+        variant: [plasma, hyprland]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runner: ubuntu-24.04
@@ -277,21 +302,21 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
       - name: Build
-        run: podman build --tag agentux:ci .
+        run: podman build --build-arg VARIANT=${{ matrix.variant }} --tag agentux:ci .
 
       - name: First login and tool checks
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/smoke"
-          podman run --rm --env GITHUB_TOKEN --env SMOKE_SUMMARY=/out/summary.md \
+          podman run --rm --env GITHUB_TOKEN --env SMOKE_SUMMARY=/out/summary.md --env SMOKE_VARIANT=${{ matrix.variant }} \
             -v ./tests:/tests:ro -v "$RUNNER_TEMP/smoke:/out" agentux:ci /tests/smoke.sh
 
       - name: Summary
         if: always()
         run: |
           if [[ -f "$RUNNER_TEMP/smoke/summary.md" ]]; then
-            { echo "## AgentUX smoke test (${{ matrix.arch }})"; echo; cat "$RUNNER_TEMP/smoke/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
+            { echo "## AgentUX smoke test (${{ matrix.variant }}, ${{ matrix.arch }})"; echo; cat "$RUNNER_TEMP/smoke/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   lint:
@@ -302,7 +327,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck
-        run: shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh
+        run: shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/*
 
       - name: hadolint
         run: docker run --rm -v "$PWD:/src:ro" -w /src hadolint/hadolint:v2.15.1 hadolint Containerfile

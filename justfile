@@ -9,9 +9,9 @@ hadolint := "docker.io/hadolint/hadolint:v2.15.1"
 default:
     @just --list
 
-# Build the image into your podman storage
-build:
-    podman build --tag {{ image }} .
+# Build the image into your podman storage; variant is plasma (ghcr.io/agentux-os/agentux) or hyprland (agentux-hyprland)
+build variant="plasma":
+    podman build --build-arg VARIANT={{ variant }} --tag {{ image }} .
 
 # Build an Anaconda installer ISO from the local image (output/bootiso/install.iso)
 iso: (_bib "anaconda-iso" "disk_config/iso.toml")
@@ -57,7 +57,7 @@ _boot-config:
 
 # Run shellcheck on the scripts and hadolint on the Containerfile
 lint:
-    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh
+    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/*
     podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile
 
 # Move the AgentUX pins in the Containerfile to the latest releases (pre-releases included, x86_64 and aarch64 RPMs required); needs gh

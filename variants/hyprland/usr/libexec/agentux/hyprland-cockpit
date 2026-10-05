@@ -1,0 +1,6 @@
+#!/usr/bin/bash
+# Super+A in Hyprland: focus the AgentUX cockpit if it is open, else open it.
+if hyprctl clients -j 2>/dev/null | jq -e 'any(.[]; .class == "agentux-cockpit")' >/dev/null; then
+    exec hyprctl dispatch focuswindow 'class:^(agentux-cockpit)$'
+fi
+exec agentux-cockpit "$@"
