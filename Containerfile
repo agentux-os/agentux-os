@@ -51,6 +51,19 @@ RUN core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTU
 
 COPY files/ /
 
+# Updates of this image (bootc upgrade/switch pull through containers/image)
+# must carry a cosign signature from the AgentUX key shipped in files/. Only
+# this repository gets the requirement: Fedora's policy for everything else,
+# including its insecureAcceptAnything default, is kept as is. The policy
+# can't check keyless (Fulcio) signatures from GitHub Actions, since it only
+# matches e-mail identities; CI signs both ways (see build.yml).
+RUN jq --arg key /etc/pki/containers/agentux-os.pub \
+        '.transports.docker["ghcr.io/agentux-os/agentux"] = [{"type": "sigstoreSigned", "keyPath": $key, "signedIdentity": {"type": "matchRepository"}}]' \
+        /etc/containers/policy.json > /tmp/policy.json \
+    && jq -e '.default and .transports.docker["ghcr.io/agentux-os/agentux"]' /tmp/policy.json > /dev/null \
+    && cat /tmp/policy.json > /etc/containers/policy.json \
+    && rm /tmp/policy.json
+
 # agentuxd runs as a user service for every user, like first-login. Fail the
 # build if the packaged unit ever points at a binary that isn't there, or
 # stops skipping system users (ConditionUser=!@system, packaged since

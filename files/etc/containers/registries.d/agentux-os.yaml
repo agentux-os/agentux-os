@@ -1,0 +1,6 @@
+# Look for cosign signatures (the sha256-<digest>.sig tag next to each image)
+# when pulling AgentUX images; /etc/containers/policy.json requires them for
+# ghcr.io/agentux-os/agentux. Other registries keep default.yaml's settings.
+docker:
+  ghcr.io/agentux-os:
+    use-sigstore-attachments: true
