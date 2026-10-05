@@ -29,19 +29,24 @@ RUN dnf -y install \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the Plasma overlay checksum.
-ARG AGENTUX_CORE_VERSION=0.4.0
-ARG AGENTUX_DESKTOP_VERSION=0.4.0
-ARG AGENTUX_PLASMA_SHA256=cf82bc5c343a11a7382215ac3b083f085e4c663eb8449bfc8ac85a3212142c30
+ARG AGENTUX_CORE_VERSION=0.4.1
+ARG AGENTUX_DESKTOP_VERSION=0.4.1
+ARG AGENTUX_PLASMA_SHA256=5a2d2544cbfa22d689e58a7d27a0a88a68d65be75c00d2d0b18d320ea4618516
 
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
 # cockpit, and the Plasma 6 defaults overlay (usr/ and etc/, relative to /),
-# checked against the pinned sha256 before it touches the filesystem.
-RUN core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTUX_CORE_VERSION}" \
+# checked against the pinned sha256 before it touches the filesystem. Both
+# releases ship x86_64 and aarch64 RPMs; the build runs natively on each
+# architecture (see build.yml), so the build host's machine picks them. The
+# Plasma overlay has no binaries and is the same for both.
+RUN arch="$(uname -m)" \
+    && case "$arch" in x86_64|aarch64) ;; *) echo "unsupported architecture $arch" >&2; exit 1 ;; esac \
+    && core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTUX_CORE_VERSION}" \
     && desktop="https://github.com/agentux-os/agentux-desktop/releases/download/v${AGENTUX_DESKTOP_VERSION}" \
     && plasma="/tmp/agentux-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
     && dnf -y install \
-        "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.x86_64.rpm" \
-        "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.x86_64.rpm" \
+        "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
+        "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
     && dnf clean all \
     && curl -fsSL "$desktop/${plasma#/tmp/}" -o "$plasma" \
     && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "$plasma" > "$plasma.sha256" \

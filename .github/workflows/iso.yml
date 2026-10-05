@@ -19,8 +19,22 @@ env:
   BIB: quay.io/centos-bootc/bootc-image-builder:latest
 
 jobs:
+  # One installer per architecture, each built natively: bootc-image-builder
+  # builds for the machine it runs on, and pulling the image's manifest list
+  # there picks the matching image.
   iso:
-    runs-on: ubuntu-24.04
+    name: iso (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            goarch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            goarch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     permissions:
       contents: read
@@ -28,9 +42,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Images published before the multi-arch build are amd64 only. A pull
+      # request (which builds from :latest) skips an architecture the image
+      # does not have yet; a dispatch or a tag fails on it.
+      - name: Check the image's architectures
+        id: arch
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          got="$(skopeo inspect --creds "${{ github.actor }}:$TOKEN" --override-arch "${{ matrix.goarch }}"             --format '{{.Architecture}}' "docker://$IMAGE")"
+          if [ "$got" = "${{ matrix.goarch }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = pull_request ]; then
+            echo "::notice::$IMAGE has no linux/${{ matrix.goarch }} image yet; skipping the ${{ matrix.arch }} ISO"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::$IMAGE has no linux/${{ matrix.goarch }} image (got $got)"
+            exit 1
+          fi
+
       # The image, the builder and the ISO together need far more than the
       # ~20 GB a fresh runner has free.
       - name: Free disk space
+        if: steps.arch.outputs.ok == 'true'
         run: |
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -43,14 +77,17 @@ jobs:
       # bootc-image-builder runs rootful and reads the image from root's
       # container storage.
       - name: Pull image
+        if: steps.arch.outputs.ok == 'true'
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "$TOKEN" | sudo podman login ghcr.io --username "${{ github.actor }}" --password-stdin
           sudo podman pull "$IMAGE"
           sudo podman pull "$BIB"
+          test "$(sudo podman image inspect --format '{{.Architecture}}' "$IMAGE")" = "${{ matrix.goarch }}"
 
       - name: Build ISO
+        if: steps.arch.outputs.ok == 'true'
         run: |
           mkdir -p output
           sudo podman run --rm --privileged \
@@ -66,15 +103,17 @@ jobs:
             "$IMAGE"
 
       - name: Name and checksum the ISO
+        if: steps.arch.outputs.ok == 'true'
         id: iso
         run: |
-          name="agentux-$(date -u +%Y%m%d)-x86_64"
+          name="agentux-$(date -u +%Y%m%d)-${{ matrix.arch }}"
           mv output/bootiso/install.iso "$name.iso"
           sha256sum "$name.iso" > "$name.iso.sha256"
           ls -lh "$name.iso"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
+        if: steps.arch.outputs.ok == 'true'
         with:
           name: ${{ steps.iso.outputs.name }}
           path: |
