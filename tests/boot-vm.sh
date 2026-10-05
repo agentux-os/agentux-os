@@ -88,10 +88,15 @@ run() {
     # SSH connections; otherwise each disconnect stops it.
     vm "sudo loginctl enable-linger $user"
     vm 'cat >/var/tmp/boot.sh && chmod +x /var/tmp/boot.sh' <"$here/boot.sh"
-    # first-login is running by now; sample its memory in the background
-    # (the system checks report it).
-    vm 'systemd-run --user --quiet --unit=boot-test-memory /var/tmp/boot.sh sample' </dev/null \
+    # first-login is running by now, and the Antigravity ACP server's unit
+    # waits for it; sample their memory in the background (the system checks
+    # report it). $HOME is the VM user's, expanded there.
+    # shellcheck disable=SC2016
+    vm 'systemd-run --user --quiet --unit=boot-test-memory /var/tmp/boot.sh sample agentux-first-login.service "$HOME/.local/state/agentux/first-login.done"' </dev/null \
         || echo "::warning::could not start the first-login memory sampler"
+    # shellcheck disable=SC2016
+    vm 'systemd-run --user --quiet --unit=boot-test-memory-acp /var/tmp/boot.sh sample agentux-antigravity-acp.service "$HOME/.local/state/agentux/antigravity-acp.done"' </dev/null \
+        || echo "::warning::could not start the Antigravity ACP server memory sampler"
 
     # The first boot screen: the greeter, or plasma-setup's first-boot wizard.
     vm 'timeout 300 bash -c "until systemctl is-active -q display-manager.service; do sleep 5; done"' || true

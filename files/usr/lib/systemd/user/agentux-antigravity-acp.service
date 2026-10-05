@@ -1,0 +1,33 @@
+[Unit]
+Description=Install Antigravity's ACP server (AgentUX, optional, low priority)
+ConditionPathExists=!%S/agentux/antigravity-acp.done
+# Only for people, like agentux-first-login.service.
+ConditionUser=!@system
+# A ~334 MB download (~1 GB unpacked) that only Antigravity's ACP sessions
+# need: it waits for first-login, so the agent CLIs are ready first, and does
+# not hold it up. It runs either way if first-login failed.
+After=agentux-first-login.service
+StartLimitIntervalSec=2h
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/nm-online -q -t 60
+ExecStart=/usr/libexec/agentux/first-login antigravity-acp
+Restart=on-failure
+RestartSec=15min
+# The download runs under a 1200s timeout; with nm-online's 60s and a margin
+# this bounds the run (a oneshot unit has no start timeout by default).
+TimeoutStartSec=25min
+# Stay out of the desktop's way.
+Nice=19
+IOSchedulingClass=idle
+# The archive and its contents fill the page cache, charged to this unit (the
+# boot test saw a 3.8 GB peak when this was part of first-login, of which at
+# most ~0.4 GB was anonymous memory). Above this soft limit the kernel
+# reclaims the unit's cache instead of the session's memory; nothing is
+# killed.
+MemoryHigh=1G
+
+[Install]
+WantedBy=default.target

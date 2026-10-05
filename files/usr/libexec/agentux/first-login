@@ -1,38 +1,111 @@
 #!/usr/bin/bash
-# Installs per-user tools that update faster than the image: the coding agent
-# CLIs, their ACP adapters and the mise-managed dev tools. Runs once per user;
-# rerun with `rm ~/.local/state/agentux/first-login.done` to repeat.
+# Installs per-user tools that update faster than the image.
+#
+#   first-login                  the coding agent CLIs, their ACP adapters and
+#                                the mise-managed dev tools
+#                                (agentux-first-login.service)
+#   first-login antigravity-acp  Antigravity's ACP server, a ~1 GB download
+#                                kept off the critical path
+#                                (agentux-antigravity-acp.service)
+#
+# Each runs once per user; rerun with `rm ~/.local/state/agentux/<name>.done`.
+#
+# Every step runs under `timeout` with its own budget, and every download is
+# bounded (connect timeout, stall detection, a maximum time), so a stuck
+# server or vendor installer cannot hold the unit forever: a required step
+# that fails or times out fails the run, which systemd retries; an optional
+# one only logs a warning. The units' TimeoutStartSec is the sum of these
+# budgets plus a margin; keep them in sync. Each step's outcome and duration
+# goes to ~/.local/state/agentux/<name>.steps (name, result, seconds, budget,
+# tab separated) for the tests to report.
 set -uo pipefail
+
+mode="${1:-first-login}"
+case "$mode" in
+    first-login|antigravity-acp) ;;
+    *) echo "usage: $0 [antigravity-acp]" >&2; exit 2 ;;
+esac
 
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentux"
 data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
-marker="$state_dir/first-login.done"
+marker="$state_dir/$mode.done"
+steps_file="$state_dir/$mode.steps"
 [[ -e "$marker" ]] && exit 0
 mkdir -p "$state_dir" "$HOME/.local/bin"
+: >"$steps_file"
 # The systemd user service starts with a minimal PATH; installers and the
 # post-install checks below need to find what was just installed.
 export PATH="$HOME/.local/bin:$data_dir/mise/shims:$PATH"
+export data_dir
 
-failed=()
-step() {
-    local name="$1"; shift
-    echo "agentux: installing $name"
-    "$@" || failed+=("$name")
+# Vendor installers call curl themselves. A curlrc of our own gives those
+# calls a connect timeout and aborts transfers that stall (under 1 KB/s for a
+# minute) instead of waiting forever; the step's timeout bounds the rest.
+curl_home="$(mktemp -d)"
+trap 'rm -rf "$curl_home"' EXIT
+printf '%s\n' 'connect-timeout = 20' 'speed-limit = 1024' 'speed-time = 60' \
+    >"$curl_home/.curlrc"
+export CURL_HOME="$curl_home"
+
+# fetch URL DEST MAX_SECONDS: one bounded download, retried on any error.
+fetch() {
+    curl --fail --silent --show-error --location --compressed \
+        --connect-timeout 20 --speed-limit 1024 --speed-time 60 \
+        --retry 3 --retry-all-errors --retry-delay 5 \
+        --max-time "$3" --output "$2" "$1"
 }
 
-# Optional steps only speed things up or add extras; a failure is reported
-# but does not keep the marker from being written.
-optional() {
-    local name="$1"; shift
-    echo "agentux: installing $name (optional)"
-    "$@" || echo "agentux: warning: $name failed; skipped" >&2
+# run_installer URL [ARGS...]: downloads a vendor's install script and runs
+# it. Unlike `curl | bash`, a body that is not a script (an error page, or a
+# compressed body served without Content-Encoding, as antigravity.google did
+# once) is retried instead of executed.
+run_installer() {
+    local url="$1" script attempt
+    shift
+    script="$(mktemp)" || return 1
+    for attempt in 1 2 3; do
+        if fetch "$url" "$script" 120 && [[ "$(head -c 2 "$script")" == '#!' ]]; then
+            bash "$script" "$@"
+            local rc=$?
+            rm -f "$script"
+            return "$rc"
+        fi
+        echo "agentux: $url did not return a shell script (attempt $attempt)" >&2
+        sleep 5
+    done
+    rm -f "$script"
+    return 1
+}
+
+install_claude() {
+    run_installer https://claude.ai/install.sh
 }
 
 install_opencode() {
     # The installer puts the binary in ~/.opencode/bin, where it also updates
     # itself; link it into ~/.local/bin instead of editing shell rc files.
-    curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path \
+    run_installer https://opencode.ai/install --no-modify-path \
         && ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"
+}
+
+install_antigravity_cli() {
+    run_installer https://antigravity.google/cli/install.sh
+}
+
+install_codex() {
+    npm install --global --prefix "$HOME/.local" @openai/codex
+}
+
+install_dev_tools() {
+    mise use --global bun lazygit ast-grep yq
+}
+
+# ACP adapters for Claude Code and Codex (OpenCode speaks ACP itself via
+# `opencode acp`). Installing them now spares the first ACP session an npx
+# download; without them `npx -y` still works.
+install_acp_adapters() {
+    npm install --global --prefix "$HOME/.local" \
+        @agentclientprotocol/claude-agent-acp @agentclientprotocol/codex-acp
 }
 
 # Antigravity's ACP server is a separate ~1 GB download whose URL changes with
@@ -40,22 +113,28 @@ install_opencode() {
 install_antigravity_acp() {
     local registry=https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json
     local arch url dest tmp
+    dest="$data_dir/agentux/antigravity-acp"
+    # Installed by an earlier first-login, before this had a unit of its own.
+    if [[ -x "$dest/agy_acp_server.par" ]]; then
+        ln -sf "$dest/agy_acp_server.par" "$HOME/.local/bin/agy-acp-server"
+        return 0
+    fi
     case "$(uname -m)" in
         x86_64) arch=linux-x86_64 ;;
         aarch64) arch=linux-aarch64 ;;
         *) echo "unsupported architecture $(uname -m)" >&2; return 1 ;;
     esac
-    url="$(curl -fsSL "$registry" \
-        | jq -er --arg a "$arch" '.agents[] | select(.id == "antigravity-acp") | .distribution.binary[$a].archive')" \
-        || return 1
-    dest="$data_dir/agentux/antigravity-acp"
     # Unpack next to the destination, not in /tmp: /tmp is a tmpfs, where the
-    # ~1 GB archive and its contents would sit in RAM (the boot test saw
-    # first-login peak at 4 GB), and the final mv becomes a rename.
+    # ~1 GB archive and its contents would sit in RAM, and the final mv
+    # becomes a rename.
     mkdir -p "$data_dir/agentux" || return 1
     tmp="$(mktemp -d -p "$data_dir/agentux" .antigravity-acp.XXXXXX)" || return 1
     local rc=0
-    { curl -fsSL "$url" -o "$tmp/acp.zip" \
+    { fetch "$registry" "$tmp/registry.json" 60 \
+        && url="$(jq -er --arg a "$arch" \
+            '.agents[] | select(.id == "antigravity-acp") | .distribution.binary[$a].archive' \
+            "$tmp/registry.json")" \
+        && fetch "$url" "$tmp/acp.zip" 1020 \
         && unzip -q "$tmp/acp.zip" -d "$tmp/out" \
         && chmod +x "$tmp/out/"* \
         && rm -rf "$dest" && mkdir -p "$(dirname "$dest")" && mv "$tmp/out" "$dest" \
@@ -65,21 +144,61 @@ install_antigravity_acp() {
     return "$rc"
 }
 
-step "Claude Code"      bash -o pipefail -c 'curl -fsSL https://claude.ai/install.sh | bash'
-step "OpenCode"         install_opencode
-step "Antigravity CLI"  bash -o pipefail -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
-step "Codex"            npm install --global --prefix "$HOME/.local" @openai/codex
-step "dev tools"        mise use --global bun lazygit ast-grep yq
+export -f fetch run_installer install_claude install_opencode \
+    install_antigravity_cli install_codex install_dev_tools \
+    install_acp_adapters install_antigravity_acp
 
-# ACP adapters for Claude Code and Codex (OpenCode speaks ACP itself via
-# `opencode acp`). Installing them now spares the first ACP session an npx
-# download; without them `npx -y` still works.
-optional "ACP adapters" npm install --global --prefix "$HOME/.local" \
-    @agentclientprotocol/claude-agent-acp @agentclientprotocol/codex-acp
-optional "Antigravity ACP server" install_antigravity_acp
+failed=()
+# run KIND NAME BUDGET FUNCTION: runs FUNCTION in its own process group under
+# `timeout`, which kills the whole group (a vendor installer and everything it
+# started) once BUDGET seconds are up. KIND is required or optional.
+run() {
+    local kind="$1" name="$2" budget="$3" fn="$4" start=$SECONDS rc result
+    if [[ "$kind" == optional ]]; then
+        echo "agentux: installing $name (optional, budget ${budget}s)"
+    else
+        echo "agentux: installing $name (budget ${budget}s)"
+    fi
+    timeout --kill-after=30 "$budget" bash -o pipefail -c "$fn"
+    rc=$?
+    local took=$(( SECONDS - start ))
+    case "$rc" in
+        0) result=ok ;;
+        124|137) result=timeout ;;
+        *) result=failed ;;
+    esac
+    printf '%s\t%s\t%s\t%s\n' "$name" "$result" "$took" "$budget" >>"$steps_file"
+    if [[ "$result" == ok ]]; then
+        echo "agentux: $name done in ${took}s"
+        return 0
+    fi
+    local why="failed (exit $rc)"
+    [[ "$result" == timeout ]] && why="timed out after ${budget}s"
+    if [[ "$kind" == optional ]]; then
+        echo "agentux: warning: $name $why; skipped" >&2
+    else
+        echo "agentux: $name $why" >&2
+        failed+=("$name")
+    fi
+}
+
+if [[ "$mode" == first-login ]]; then
+    # 6 x 300s = 1800s; the unit allows 35 minutes including nm-online.
+    run required "Claude Code"     300 install_claude
+    run required "OpenCode"        300 install_opencode
+    run required "Antigravity CLI" 300 install_antigravity_cli
+    run required "Codex"           300 install_codex
+    run required "dev tools"       300 install_dev_tools
+    run optional "ACP adapters"    300 install_acp_adapters
+else
+    # ~334 MB at low priority; 1200s leaves a slow link (~3 Mbit/s) room.
+    # The unit allows 25 minutes including nm-online. It is optional for the
+    # system as a whole, but failing here lets systemd retry it later.
+    run required "Antigravity ACP server" 1200 install_antigravity_acp
+fi
 
 if (( ${#failed[@]} )); then
-    echo "agentux: failed: ${failed[*]}; will retry on next login" >&2
+    echo "agentux: failed: ${failed[*]}; will retry later" >&2
     exit 1
 fi
 touch "$marker"

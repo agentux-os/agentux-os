@@ -62,7 +62,7 @@ RUN chmod 0755 /usr/libexec/agentux/first-login \
     && test -x "$exec_start" \
     && grep -qx 'ConditionUser=!@system' /usr/lib/systemd/user/agentuxd.service \
     && test -x /usr/bin/nm-online \
-    && systemctl --global enable agentux-first-login.service agentuxd.service
+    && systemctl --global enable agentux-first-login.service agentux-antigravity-acp.service agentuxd.service
 
 LABEL org.opencontainers.image.title="AgentUX" \
       org.opencontainers.image.description="The Linux distribution where every coding agent works as one team" \
