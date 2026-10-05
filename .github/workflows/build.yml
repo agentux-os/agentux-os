@@ -57,7 +57,17 @@ jobs:
       - name: First login and tool checks
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: podman run --rm --env GITHUB_TOKEN -v ./tests:/tests:ro agentux:ci /tests/smoke.sh
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke"
+          podman run --rm --env GITHUB_TOKEN --env SMOKE_SUMMARY=/out/summary.md \
+            -v ./tests:/tests:ro -v "$RUNNER_TEMP/smoke:/out" agentux:ci /tests/smoke.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          if [[ -f "$RUNNER_TEMP/smoke/summary.md" ]]; then
+            { echo "## AgentUX smoke test"; echo; cat "$RUNNER_TEMP/smoke/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   lint:
     runs-on: ubuntu-24.04

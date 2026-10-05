@@ -2,7 +2,10 @@
 # Smoke test for the AgentUX image, run as root inside a container of it:
 #   podman run --rm -v ./tests:/tests:ro,z <image> /tests/smoke.sh
 # Creates a regular user, runs first-login as that user for real (needs
-# network) and checks that every tool resolves from a clean login shell.
+# network), bounded by its unit's TimeoutStartSec, and checks that every tool
+# resolves from a clean login shell. Then installs Antigravity's ACP server
+# the way its own unit does (warnings only). Step timings go to the log and,
+# if SMOKE_SUMMARY names a file, to it as Markdown.
 set -euo pipefail
 
 user=agentux-smoke
@@ -22,9 +25,71 @@ as_user() {
 }
 
 fail=0
-echo "::group::first-login"
-as_user /usr/libexec/agentux/first-login || { echo "::error::first-login failed"; fail=1; }
-echo "::endgroup::"
+units=/usr/lib/systemd/user
+state=$home/.local/state/agentux
+# SMOKE_SUMMARY, if set, is a Markdown file that gets the timings.
+summary="${SMOKE_SUMMARY:-/dev/null}"
+
+# TimeoutStartSec= of a unit file in seconds (s, min and h suffixes).
+unit_timeout() {
+    local v
+    v="$(sed -n 's/^TimeoutStartSec=//p' "$units/$1")"
+    case "$v" in
+        *min) echo $(( ${v%min} * 60 )) ;;
+        *h)   echo $(( ${v%h} * 3600 )) ;;
+        *s)   echo "${v%s}" ;;
+        [0-9]*) echo "$v" ;;
+        *)    echo 0 ;;
+    esac
+}
+
+# timed_run MODE UNIT: runs `first-login MODE` as the user, bounded by the
+# unit's TimeoutStartSec as systemd would, and reports each step's time.
+# Sets run_rc, run_took and run_budget.
+timed_run() {
+    local mode="$1" unit="$2" budget
+    budget="$(unit_timeout "$unit")"
+    if (( budget <= 0 )); then
+        echo "::error::$unit has no TimeoutStartSec"
+        fail=1 budget=3600
+    fi
+    local start=$SECONDS
+    echo "::group::first-login $mode (budget ${budget}s, $unit TimeoutStartSec)"
+    run_rc=0
+    as_user timeout --kill-after=30 "$budget" /usr/libexec/agentux/first-login "$mode" || run_rc=$?
+    run_took=$(( SECONDS - start ))
+    run_budget=$budget
+    echo "::endgroup::"
+    local steps="$state/$mode.steps" name result took step_budget sum=0
+    echo "== first-login $mode: ${run_took}s of ${budget}s, exit $run_rc"
+    {
+        echo "### first-login $mode: ${run_took}s of ${budget}s (exit $run_rc)"
+        echo
+        echo "| Step | Result | Seconds | Budget |"
+        echo "|---|---|---|---|"
+    } >>"$summary"
+    if [[ -r "$steps" ]]; then
+        while IFS=$'\t' read -r name result took step_budget; do
+            printf '      %-24s %-8s %5ss of %ss\n' "$name" "$result" "$took" "$step_budget"
+            echo "| $name | $result | $took | $step_budget |" >>"$summary"
+            sum=$(( sum + step_budget ))
+        done <"$steps"
+    fi
+    echo >>"$summary"
+    # nm-online's 60s come first in the unit; the steps' budgets must fit
+    # after it, or systemd would kill a run that is still within them.
+    if (( sum + 60 > budget )); then
+        echo "::error::$unit TimeoutStartSec=${budget}s is less than its steps' budgets (${sum}s) plus nm-online's 60s"
+        fail=1
+    fi
+}
+
+timed_run first-login agentux-first-login.service
+if (( run_rc == 124 || run_rc == 137 )); then
+    echo "::error::first-login did not finish within ${run_budget}s"; fail=1
+elif (( run_rc != 0 )); then
+    echo "::error::first-login failed (exit $run_rc)"; fail=1
+fi
 
 check() {
     local cmd="$1"
@@ -75,6 +140,8 @@ assert "agentuxd enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentuxd.service
 assert "agentux-first-login enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentux-first-login.service
+assert "agentux-antigravity-acp enabled for all users" \
+    test -L /etc/systemd/user/default.target.wants/agentux-antigravity-acp.service
 
 # Start the daemon as the user, the way its user unit does, and talk to it.
 runtime_dir="$(mktemp -d)"
@@ -107,6 +174,15 @@ if [[ -x "$envgen" ]]; then
     echo "      user manager PATH: $user_path"
 else
     echo "::warning::$envgen not found; environment.d not resolved"
+fi
+
+# Antigravity's ACP server has a lower-priority unit of its own; it is
+# optional, so a failure or timeout here only warns.
+timed_run antigravity-acp agentux-antigravity-acp.service
+if (( run_rc == 124 || run_rc == 137 )); then
+    echo "::warning::Antigravity ACP server did not finish within ${run_budget}s"
+elif (( run_rc != 0 )); then
+    echo "::warning::Antigravity ACP server install failed (exit $run_rc)"
 fi
 
 echo "== optional ACP extras (warnings only)"

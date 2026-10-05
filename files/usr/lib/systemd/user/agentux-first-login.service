@@ -1,5 +1,5 @@
 [Unit]
-Description=Install AgentUX per-user tools (agent CLIs, dev tools)
+Description=Install AgentUX per-user tools (agent CLIs, ACP adapters, dev tools)
 ConditionPathExists=!%S/agentux/first-login.done
 # Only for people: a system user with a session of its own, like
 # plasma-setup running the first-boot wizard, must not download several GB of
@@ -20,11 +20,14 @@ ExecStartPre=/usr/bin/nm-online -q -t 60
 ExecStart=/usr/libexec/agentux/first-login
 Restart=on-failure
 RestartSec=5min
-# The downloads (the Antigravity ACP server alone is ~334 MB, ~1 GB unpacked)
-# fill the page cache, all of it charged to this unit: its memory peak was
-# 3.8 GB, of which at most ~0.4 GB was the installers' own (anonymous)
-# memory. Above this soft limit the kernel reclaims the unit's cache instead
-# of pushing the desktop session's memory out; nothing is killed.
+# A oneshot unit has no start timeout by default, so a stuck download would
+# keep it activating forever. first-login runs each of its six steps under a
+# 300s timeout (1800s in all); with nm-online's 60s and a margin this bounds
+# the whole run. A timeout counts as a failure and is retried like one.
+TimeoutStartSec=35min
+# The downloads fill the page cache, all of it charged to this unit. Above
+# this soft limit the kernel reclaims the unit's cache instead of pushing the
+# desktop session's memory out; nothing is killed.
 MemoryHigh=1G
 
 [Install]
