@@ -1,16 +1,34 @@
 [Unit]
-Description=Install AgentUX per-user tools (agent CLIs, dev tools)
-Wants=network-online.target
-After=network-online.target
+Description=Install AgentUX per-user tools (agent CLIs, ACP adapters, dev tools)
 ConditionPathExists=!%S/agentux/first-login.done
 # Only for people: a system user with a session of its own, like
 # plasma-setup running the first-boot wizard, must not download several GB of
 # agent CLIs into its tmpfs home.
 ConditionUser=!@system
+# network-online.target exists only in the system manager, so a user unit
+# cannot order itself after it; ExecStartPre below waits for the network
+# instead. Retries within a session are bounded: at most 4 starts per hour,
+# after that the unit stays failed until the next login.
+StartLimitIntervalSec=1h
+StartLimitBurst=4
 
 [Service]
 Type=oneshot
+# Wait up to a minute for NetworkManager to have a connection up. Offline, the
+# unit fails and is retried below, and again on the next login.
+ExecStartPre=/usr/bin/nm-online -q -t 60
 ExecStart=/usr/libexec/agentux/first-login
+Restart=on-failure
+RestartSec=5min
+# A oneshot unit has no start timeout by default, so a stuck download would
+# keep it activating forever. first-login runs each of its six steps under a
+# 300s timeout (1800s in all); with nm-online's 60s and a margin this bounds
+# the whole run. A timeout counts as a failure and is retried like one.
+TimeoutStartSec=35min
+# The downloads fill the page cache, all of it charged to this unit. Above
+# this soft limit the kernel reclaims the unit's cache instead of pushing the
+# desktop session's memory out; nothing is killed.
+MemoryHigh=1G
 
 [Install]
 WantedBy=default.target

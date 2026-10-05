@@ -7,8 +7,8 @@
 #       config (DIR/config.toml) that adds the test user with them.
 #   boot-vm.sh run DISK IMAGE DIR
 #       Boot DISK (a qcow2 built with that config) on a copy-on-write overlay,
-#       check it booted IMAGE, then reboot into Plasma with autologin for the
-#       desktop checks. Logs, screenshots and summary.md go to DIR.
+#       check it booted IMAGE, screenshot the login screen, then reboot into
+#       Plasma with autologin for the desktop checks. Logs, screenshots and summary.md go to DIR.
 #
 # Needs qemu-system-x86_64 with KVM, qemu-img, OVMF, ssh and python3. Only the
 # system checks decide the exit status; the desktop ones are best effort.
@@ -88,16 +88,30 @@ run() {
     # SSH connections; otherwise each disconnect stops it.
     vm "sudo loginctl enable-linger $user"
     vm 'cat >/var/tmp/boot.sh && chmod +x /var/tmp/boot.sh' <"$here/boot.sh"
+    # first-login is running by now, and the Antigravity ACP server's unit
+    # waits for it; sample their memory in the background (the system checks
+    # report it). $HOME is the VM user's, expanded there.
+    # shellcheck disable=SC2016
+    vm 'systemd-run --user --quiet --unit=boot-test-memory /var/tmp/boot.sh sample agentux-first-login.service "$HOME/.local/state/agentux/first-login.done"' </dev/null \
+        || echo "::warning::could not start the first-login memory sampler"
+    # shellcheck disable=SC2016
+    vm 'systemd-run --user --quiet --unit=boot-test-memory-acp /var/tmp/boot.sh sample agentux-antigravity-acp.service "$HOME/.local/state/agentux/antigravity-acp.done"' </dev/null \
+        || echo "::warning::could not start the Antigravity ACP server memory sampler"
 
     # The first boot screen: the greeter, or plasma-setup's first-boot wizard.
     vm 'timeout 300 bash -c "until systemctl is-active -q display-manager.service; do sleep 5; done"' || true
     sleep 20
     screenshot 01-first-boot
 
+    # The agentux-core version the Containerfile pins (the published image is
+    # built from main, so this holds for scheduled runs too).
+    local aux_version
+    aux_version="$(sed -n 's/^ARG AGENTUX_CORE_VERSION=//p' "$here/../Containerfile")"
+
     echo "::group::system checks"
     set +e
     { printf '%s\n' "${GITHUB_TOKEN:-}"; } \
-        | vm "read -r GITHUB_TOKEN; export GITHUB_TOKEN; EXPECTED_IMAGE='$image' /var/tmp/boot.sh system" \
+        | vm "read -r GITHUB_TOKEN; export GITHUB_TOKEN; EXPECTED_IMAGE='$image' EXPECTED_AUX_VERSION='$aux_version' /var/tmp/boot.sh system" \
         | tee "$dir/boot-system.log"
     system_rc=${PIPESTATUS[1]}
     set -e
@@ -112,15 +126,26 @@ run() {
     return "$system_rc"
 }
 
-# Reboot with autologin into Plasma (Wayland) for the test user, through a
-# display manager drop-in that exists only on this VM, and screenshot it.
+# Screenshot the login screen, then reboot with autologin into Plasma
+# (Wayland) for the test user, through a display manager drop-in that exists
+# only on this VM, and screenshot it.
 desktop() {
     echo "::group::desktop checks"
     local dm
     dm="$(vm 'systemctl show -P Id display-manager.service')"
     dm="${dm%.service}"
     echo "display manager: $dm"
-    vm "sudo mkdir -p /etc/$dm.conf.d && printf '[Autologin]\nUser=$user\nSession=plasma.desktop\n' | sudo tee /etc/$dm.conf.d/zz-boot-test-autologin.conf"
+    # The login screen. On the first boot plasma-setup logs its wizard in
+    # automatically (/etc/$dm.conf.d/99-plasma-setup.conf, rewritten on every
+    # boot until the wizard is completed); a later drop-in without autologin
+    # overrides it, and restarting the display manager ends the wizard session.
+    vm "sudo mkdir -p /etc/$dm.conf.d && printf '[Autologin]\nUser=\nSession=\n' | sudo tee /etc/$dm.conf.d/zz-boot-test-autologin.conf && sudo systemctl restart display-manager.service" </dev/null \
+        || echo "::warning::could not restart the display manager without autologin"
+    vm 'timeout 120 bash -c "until systemctl is-active -q display-manager.service; do sleep 5; done"' </dev/null || true
+    sleep 20
+    screenshot 02-login-screen
+
+    vm "printf '[Autologin]\nUser=$user\nSession=plasma.desktop\n' | sudo tee /etc/$dm.conf.d/zz-boot-test-autologin.conf"
     local boot_id
     boot_id="$(vm 'cat /proc/sys/kernel/random/boot_id')"
     vm 'sudo systemctl reboot' </dev/null || true
@@ -144,9 +169,9 @@ desktop() {
     set -e
     # Give Plasma and the cockpit a moment to settle, then once more later.
     sleep 15
-    screenshot 02-desktop
+    screenshot 03-desktop
     sleep 60
-    screenshot 03-desktop-later
+    screenshot 04-desktop-later
     echo "::endgroup::"
     summary_phase "Desktop checks (best effort)" "$desktop_rc" "$dir/boot-desktop.log"
 }
@@ -249,12 +274,17 @@ summary_phase() {
     n_fail="$(grep -c '^FAIL ' "$log" || true)"
     n_warn="$(grep -c '^warn ' "$log" || true)"
     summary_line "$name" "$([[ "$rc" == 0 ]] && echo ok || echo "FAIL (exit $rc)"): $n_ok ok, $n_fail failed, $n_warn warnings"
+    # Measurements (e.g. first-login's memory peak) get a row each.
+    local metric
+    while IFS= read -r metric; do
+        summary_line "${metric%%: *}" "${metric#*: }"
+    done < <(sed -n 's/^metric  //p' "$log")
     {
         echo
         echo "<details><summary>$name</summary>"
         echo
         echo '```'
-        grep -E '^(ok|FAIL|warn) |^== ' "$log" || true
+        grep -E '^(ok|FAIL|warn|metric) |^== ' "$log" || true
         echo '```'
         echo "</details>"
         echo
