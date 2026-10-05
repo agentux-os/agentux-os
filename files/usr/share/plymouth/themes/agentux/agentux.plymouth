@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=AgentUX
+Description=The AgentUX mark on Ink, with dashes running along its lanes into one line
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/agentux
+ScriptFile=/usr/share/plymouth/themes/agentux/agentux.script

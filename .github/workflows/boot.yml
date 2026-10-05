@@ -21,6 +21,7 @@ on:
       - Containerfile
       - files/**
       - tests/boot*
+      - tests/splash.py
       - .github/workflows/boot.yml
 
 env:
@@ -151,6 +152,7 @@ jobs:
           name: boot-test-${{ matrix.arch }}-${{ github.run_id }}
           path: |
             output/boot-test/*.png
+            output/boot-test/splash/
             output/boot-test/*.ppm
             output/boot-test/*.log
             output/boot-test/*.txt

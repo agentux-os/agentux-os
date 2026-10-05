@@ -1,7 +1,8 @@
 #!/usr/bin/bash
 # Boot test checks, run inside a booted AgentUX VM as the test user (over SSH,
 # with passwordless sudo) by tests/boot-vm.sh:
-#   boot.sh system   the booted image, system and user units, the first-boot
+#   boot.sh system   the booted image, system and user units, the boot
+#                    splash (theme, initramfs, rhgb), the first-boot
 #                    wizard's session, first login, agentuxd, an end-to-end
 #                    run with fake agents and one with checks in rootless
 #                    Podman (that one only warns)
@@ -88,6 +89,42 @@ check_image() {
         ok "bootc booted $booted"
     else
         bad "bootc booted '${booted:-nothing}', expected '${EXPECTED_IMAGE:-?}'"
+    fi
+}
+
+# The AgentUX boot splash: selected, in the initramfs the system booted with
+# (built into the image, /usr/lib/modules/$kver/initramfs.img), and asked for
+# on the kernel command line (rhgb, from the image's bootc kargs.d). Whether
+# it showed on screen is boot-vm.sh's to report, from its screendumps.
+check_splash() {
+    echo "== boot splash"
+    local theme initramfs list
+    theme="$(plymouth-set-default-theme 2>&1)"
+    if [[ "$theme" == agentux ]]; then
+        ok "plymouth-set-default-theme: agentux"
+    else
+        bad "plymouth-set-default-theme: '$theme', expected agentux"
+    fi
+    initramfs="/usr/lib/modules/$(uname -r)/initramfs.img"
+    if ! list="$(sudo lsinitrd "$initramfs" 2>/dev/null)" || [[ -z "$list" ]]; then
+        bad "lsinitrd $initramfs"
+        return
+    fi
+    if grep -q 'usr/share/plymouth/themes/agentux/agentux.script$' <<<"$list"; then
+        ok "initramfs has plymouth/themes/agentux  [$(grep -c 'plymouth/themes/agentux/' <<<"$list") files]"
+    else
+        bad "initramfs has no plymouth/themes/agentux"
+        grep 'plymouth/themes/' <<<"$list" | indent
+    fi
+    if grep -q '/plymouth/script.so$' <<<"$list"; then
+        ok "initramfs has Plymouth's script plugin"
+    else
+        bad "initramfs has no Plymouth script plugin (script.so)"
+    fi
+    if grep -qw rhgb /proc/cmdline; then
+        ok "kernel command line has rhgb"
+    else
+        bad "kernel command line has no rhgb: $(cat /proc/cmdline)"
     fi
 }
 
@@ -700,6 +737,7 @@ case "$phase" in
     system)
         check_image
         check_system
+        check_splash
         check_first_login
         check_antigravity_acp
         check_system_users

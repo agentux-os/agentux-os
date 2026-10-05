@@ -1,0 +1,3 @@
+# Show the AgentUX boot splash (Plymouth) instead of boot messages. Kinoite's
+# image has no kernel arguments of its own; installers used to add these.
+kargs = ["rhgb", "quiet"]

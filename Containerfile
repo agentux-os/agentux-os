@@ -56,6 +56,31 @@ RUN arch="$(uname -m)" \
 
 COPY files/ /
 
+# Boot splash: the AgentUX Plymouth theme (files/usr/share/plymouth/themes/
+# agentux, a script-plugin theme; its images come from plymouth/build.py).
+# Plymouth runs from the initramfs, which in a bootc image is built here, not
+# on the installed system: regenerate the kernel's /usr/lib/modules/$kver/
+# initramfs.img with the theme in it, the way Universal Blue images do
+# (generic, not host-only, with ostree's module, reproducible), and fail the
+# build if the theme or its plugin is missing from it. Same on x86_64 and
+# aarch64. The splash shows when the kernel command line has rhgb, which
+# files/usr/lib/bootc/kargs.d/10-agentux-splash.toml adds.
+RUN dnf -y install plymouth-plugin-script \
+    && dnf clean all \
+    && plymouth-set-default-theme agentux \
+    && test "$(plymouth-set-default-theme)" = agentux \
+    && set -- /usr/lib/modules/* \
+    && test "$#" = 1 \
+    && kver="${1##*/}" \
+    && img="/usr/lib/modules/$kver/initramfs.img" \
+    && DRACUT_NO_XATTR=1 dracut --no-hostonly --kver "$kver" --reproducible --add ostree --force "$img" \
+    && lsinitrd "$img" > /tmp/initramfs.txt \
+    && grep -q 'usr/share/plymouth/themes/agentux/agentux.script$' /tmp/initramfs.txt \
+    && grep -q 'usr/share/plymouth/themes/agentux/dashes.png$' /tmp/initramfs.txt \
+    && grep -q '/plymouth/script.so$' /tmp/initramfs.txt \
+    && rm /tmp/initramfs.txt \
+    && chmod 0644 "$img"
+
 # Updates of this image (bootc upgrade/switch pull through containers/image)
 # must carry a cosign signature from the AgentUX key shipped in files/. Only
 # this repository gets the requirement: Fedora's policy for everything else,

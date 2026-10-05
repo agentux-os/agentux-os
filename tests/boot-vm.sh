@@ -9,6 +9,9 @@
 #       Boot DISK (a qcow2 built with that config) on a copy-on-write overlay,
 #       check it booted IMAGE, screenshot the login screen, then reboot into
 #       Plasma with autologin for the desktop checks. Logs, screenshots and summary.md go to DIR.
+#       Screendumps of the first ~45 s of the first boot and of the reboot go
+#       to DIR/splash/boot and DIR/splash/reboot, with a (best effort) check
+#       that they show the AgentUX boot splash (tests/splash.py).
 #
 # Needs QEMU for the host's architecture with KVM (qemu-system-x86_64 and OVMF
 # on x86_64, qemu-system-aarch64 and AAVMF on aarch64), qemu-img, ssh and
@@ -32,7 +35,10 @@ config() {
     ssh-keygen -q -t ed25519 -N '' -C agentux-boot-test -f "$dir/id_ed25519"
     head -c 18 /dev/urandom | base64 | tr -d '/+=' >"$dir/password"
     # sshd is not enabled in Kinoite; the kernel argument starts it for this
-    # disk only. The serial console gets systemd's boot messages too.
+    # disk only. The serial console gets systemd's boot messages too. With a
+    # serial console Plymouth would draw only text there and skip the screen;
+    # plymouth.ignore-serial-consoles keeps the boot splash on the screen,
+    # where the frames boot-vm.sh captures can show it.
     cat >"$dir/config.toml" <<EOF
 [[customizations.user]]
 name = "$user"
@@ -41,7 +47,7 @@ key = "$(cat "$dir/id_ed25519.pub")"
 groups = ["wheel"]
 
 [customizations.kernel]
-append = "systemd.wants=sshd.service console=tty0 console=$serial,115200"
+append = "systemd.wants=sshd.service console=tty0 console=$serial,115200 plymouth.ignore-serial-consoles"
 EOF
     echo "wrote $dir/config.toml"
 }
@@ -71,6 +77,7 @@ run() {
 
     cp "$vars" "$dir/OVMF_VARS.fd"
     rm -f "$dir/vm.qcow2" "$dir"/*.png "$dir"/*.log "$dir"/*.txt "$dir/summary.md"
+    rm -rf "$dir/splash"
     qemu-img create -q -f qcow2 -F qcow2 -b "$(realpath "$disk")" "$dir/vm.qcow2"
     "$qemu" \
         -name agentux-boot-test \
@@ -86,17 +93,20 @@ run() {
         -qmp unix:"$dir/qmp.sock",server=on,wait=off \
         -pidfile "$dir/qemu.pid" -daemonize
     trap cleanup EXIT
+    capture_frames boot
 
     system_rc=1 desktop_rc=skipped
     summary_init "$image"
     if ! wait_ssh "${BOOT_TEST_BOOT_TIMEOUT:-900}"; then
         echo "::error::no SSH after boot; see serial.log and boot-no-ssh.png"
+        splash_report boot "Boot splash (best effort)"
         screenshot boot-no-ssh
         summary_line "Boot to SSH" "FAIL (see serial.log)"
         summary_files
         return 1
     fi
     summary_line "Boot to SSH" "ok after ${waited}s"
+    splash_report boot "Boot splash (best effort)"
     # Passwordless sudo for the rest of the test.
     vm "sudo -S -p '' sh -c 'echo \"$user ALL=(ALL) NOPASSWD: ALL\" >/etc/sudoers.d/90-boot-test && chmod 0440 /etc/sudoers.d/90-boot-test'" \
         <"$dir/password" >/dev/null 2>&1
@@ -164,11 +174,14 @@ desktop() {
     vm "printf '[Autologin]\nUser=$user\nSession=plasma.desktop\n' | sudo tee /etc/$dm.conf.d/zz-boot-test-autologin.conf"
     local boot_id
     boot_id="$(vm 'cat /proc/sys/kernel/random/boot_id')"
+    # Frames of the reboot: the splash in reboot mode, then the next boot's.
+    capture_frames reboot
     vm 'sudo systemctl reboot' </dev/null || true
     local deadline=$(( SECONDS + 600 )) now=""
     until [[ "$now" =~ ^[0-9a-f-]+$ && "$now" != "$boot_id" ]]; do
         if (( SECONDS > deadline )); then
             echo "::warning::VM did not come back after reboot"
+            splash_report reboot "Reboot splash (best effort)"
             screenshot reboot-no-ssh
             summary_line "Reboot into desktop" "FAIL: no SSH after reboot"
             desktop_rc=1
@@ -179,6 +192,7 @@ desktop() {
         now="$(vm 'cat /proc/sys/kernel/random/boot_id' </dev/null 2>/dev/null || true)"
     done
     summary_line "Reboot into desktop" "ok"
+    splash_report reboot "Reboot splash (best effort)"
     set +e
     vm '/var/tmp/boot.sh desktop' </dev/null | tee "$dir/boot-desktop.log"
     desktop_rc=${PIPESTATUS[0]}
@@ -258,7 +272,44 @@ collect_logs() {
     fi
 }
 
+# Screendumps every half second for BOOT_TEST_SPLASH_SECONDS (45), in the
+# background, into DIR/splash/NAME: early boot, where the boot splash shows.
+capture_frames() {
+    local name="$1"
+    mkdir -p "$dir/splash/$name"
+    (
+        local i=0 end=$(( SECONDS + ${BOOT_TEST_SPLASH_SECONDS:-45} ))
+        while (( SECONDS < end )); do
+            qmp "{\"execute\": \"screendump\", \"arguments\": {\"filename\": \"$dir/splash/$name/$(printf %03d "$i").ppm\"}}" \
+                2>/dev/null || true
+            i=$(( i + 1 ))
+            sleep 0.5
+        done
+    ) &
+    capture_pid=$!
+}
+
+# Waits for capture_frames, turns its frames into PNGs and reports whether
+# any shows the AgentUX splash. Never fails the test: what a VM's display
+# shows that early depends on the firmware and the driver handover.
+splash_report() {
+    local name="$1" title="$2" result
+    if [[ -n "${capture_pid:-}" ]]; then
+        wait "$capture_pid" 2>/dev/null || true
+    fi
+    capture_pid=""
+    result="$(python3 "$here/splash.py" "$dir/splash/$name" 2>&1 | tail -n1)" || true
+    echo "$title: $result"
+    if [[ "$result" != seen* ]]; then
+        echo "::warning::$title: ${result:-no result}; see splash/$name in the artifact"
+    fi
+    summary_line "$title" "${result:-no result} (splash/$name/)"
+}
+
 cleanup() {
+    if [[ -n "${capture_pid:-}" ]]; then
+        kill "$capture_pid" 2>/dev/null || true
+    fi
     if [[ -S "$dir/qmp.sock" ]]; then
         qmp '{"execute": "quit"}' 2>/dev/null || true
     fi
@@ -315,7 +366,7 @@ summary_files() {
         [[ -e "$f" ]] && names+=("$(basename "$f")")
     done
     printf '
-Screenshots and logs (artifact): %s
+Screenshots and logs (artifact): %s; boot splash frames in splash/
 ' "${names[*]}" >>"$dir/summary.md"
 }
 
