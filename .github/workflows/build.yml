@@ -84,8 +84,12 @@ jobs:
   # and every image in it, checks the signatures with cosign and with the
   # policy the image ships (for each architecture), and only then moves the
   # public tags to the list, digest unchanged.
+  # No `name:` with matrix values here: a job skipped by its `if` (on pull
+  # requests) never expands its matrix, so the check would read
+  # "publish (${{ matrix.variant }})". GitHub's default name lists the matrix
+  # values when it runs ("publish (plasma, agentux)") and says "publish" when
+  # skipped.
   publish:
-    name: publish (${{ matrix.variant }})
     needs: image
     if: github.event_name != 'pull_request'
     strategy:
