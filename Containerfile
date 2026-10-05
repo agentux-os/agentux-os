@@ -52,10 +52,13 @@ RUN core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTU
 COPY files/ /
 
 # agentuxd runs as a user service for every user, like first-login. Fail the
-# build if the packaged unit ever points at a binary that isn't there.
+# build if the packaged unit ever points at a binary that isn't there, or if
+# nm-online (NetworkManager), which first-login waits for the network with,
+# goes missing.
 RUN chmod 0755 /usr/libexec/agentux/first-login \
     && exec_start="$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' /usr/lib/systemd/user/agentuxd.service)" \
     && test -x "$exec_start" \
+    && test -x /usr/bin/nm-online \
     && systemctl --global enable agentux-first-login.service agentuxd.service
 
 LABEL org.opencontainers.image.title="AgentUX" \

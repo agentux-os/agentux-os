@@ -5,16 +5,20 @@
 #                    agentuxd and an end-to-end run with fake agents
 #   boot.sh desktop  after an autologin reboot: the Plasma session and the
 #                    cockpit (reported, but boot-vm.sh does not fail on them)
+#   boot.sh sample   samples first-login's memory until it completed (run in
+#                    the background from the first SSH login)
 # EXPECTED_IMAGE is the image reference the system should have booted. An
 # optional GITHUB_TOKEN is used only to retry a failed first login (mise
 # resolves versions through the GitHub API, which CI runners share).
 set -uo pipefail
 
-phase="${1:?usage: boot.sh system|desktop}"
+phase="${1:?usage: boot.sh system|desktop|sample}"
 fail=0
 ok()   { printf 'ok    %s\n' "$*"; }
 bad()  { printf 'FAIL  %s\n' "$*"; fail=1; }
 warn() { printf 'warn  %s\n' "$*"; }
+# A measurement for the job summary: a name and a value.
+metric() { printf 'metric  %s: %s\n' "$1" "$2"; }
 indent() { sed 's/^/      /'; }
 
 # A description and a command that must succeed; its first output line is shown.
@@ -43,6 +47,7 @@ uid="$(id -u)"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$uid}"
 state="${XDG_STATE_HOME:-$HOME/.local/state}/agentux"
 marker="$state/first-login.done"
+memory_samples=/var/tmp/first-login-memory
 
 failed_units() {
     # $1: --system or --user
@@ -82,6 +87,47 @@ check_system() {
     assert "display manager active" systemctl is-active display-manager.service
 }
 
+# Polls agentux-first-login.service until it finished, failed for good, failed
+# once and waits to restart, or `limit` seconds passed. Sets st and sub.
+watch_first_login() {
+    local unit="$1" limit="$2" start=$SECONDS
+    while true; do
+        st="$(systemctl --user show -P ActiveState "$unit")"
+        sub="$(systemctl --user show -P SubState "$unit")"
+        [[ "$st" == inactive && -e "$marker" ]] && return
+        [[ "$st" == failed || "$sub" == auto-restart ]] && return
+        (( SECONDS - start >= limit )) && return
+        sleep 5
+    done
+}
+
+# Started by boot-vm.sh as a transient user service right after the first SSH
+# login, which starts the user manager and with it first-login: samples
+# first-login's cgroup every second until it completed, for what systemd's
+# own "memory peak" does not tell apart. Writes to $memory_samples: the
+# largest anonymous memory seen in bytes (what MemoryHigh cannot reclaim
+# without swap), the largest count of reclaims for going over MemoryHigh, and
+# the number of samples.
+sample_first_login() {
+    local unit=agentux-first-login.service deadline=$(( SECONDS + 3600 ))
+    local cg anon high anon_max=0 high_max=0 samples=0
+    while (( SECONDS < deadline )); do
+        cg="/sys/fs/cgroup$(systemctl --user show -P ControlGroup "$unit")"
+        if [[ "$cg" != /sys/fs/cgroup && -r "$cg/memory.stat" ]]; then
+            anon="$(awk '$1 == "anon" {print $2}' "$cg/memory.stat")"
+            high="$(awk '$1 == "high" {print $2}' "$cg/memory.events")"
+            (( ${anon:-0} > anon_max )) && anon_max="$anon"
+            (( ${high:-0} > high_max )) && high_max="$high"
+            samples=$(( samples + 1 ))
+            echo "$anon_max $high_max $samples" >"$memory_samples.tmp"
+            mv "$memory_samples.tmp" "$memory_samples"
+        elif [[ -e "$marker" ]]; then
+            return 0
+        fi
+        sleep 1
+    done
+}
+
 # The user manager: linger, failed units and the first-login service.
 check_first_login() {
     echo "== user session and first login"
@@ -90,22 +136,22 @@ check_first_login() {
         || warn "user default.target not active after 2 minutes"
 
     local unit=agentux-first-login.service
-    local limit="${FIRST_LOGIN_TIMEOUT:-1800}" start=$SECONDS st
+    assert "nm-online (first-login waits for the network with it)" test -x /usr/bin/nm-online
+    assert "$unit restarts on failure" \
+        bash -c "systemctl --user show -P Restart $unit | grep -qx on-failure"
+    local limit="${FIRST_LOGIN_TIMEOUT:-1800}" st="" sub=""
     echo "      waiting up to ${limit}s for $unit"
-    while true; do
-        st="$(systemctl --user show -P ActiveState "$unit")"
-        [[ -e "$marker" || "$st" == failed ]] && break
-        (( SECONDS - start >= limit )) && break
-        sleep 10
-    done
-    echo "      $unit: $st, result $(systemctl --user show -P Result "$unit"), ran $(systemctl --user show -P ExecMainStartTimestamp "$unit") .. $(systemctl --user show -P ExecMainExitTimestamp "$unit")"
+    watch_first_login "$unit" "$limit"
+    echo "      $unit: $st/$sub, result $(systemctl --user show -P Result "$unit"), restarts $(systemctl --user show -P NRestarts "$unit"), ran $(systemctl --user show -P ExecMainStartTimestamp "$unit") .. $(systemctl --user show -P ExecMainExitTimestamp "$unit")"
     if [[ ! -e "$marker" && -n "${GITHUB_TOKEN:-}" ]]; then
         warn "first login did not complete on its own; its log:"
         journalctl --user -u "$unit" --no-pager -o cat -n 40 | indent
-        echo "      retrying once with GITHUB_TOKEN in the user manager environment"
+        echo "      retrying now with GITHUB_TOKEN in the user manager environment"
         systemctl --user set-environment GITHUB_TOKEN="$GITHUB_TOKEN"
         systemctl --user reset-failed "$unit"
-        timeout "$limit" systemctl --user start "$unit"
+        systemctl --user start --no-block "$unit"
+        sleep 5
+        watch_first_login "$unit" "$limit"
         systemctl --user unset-environment GITHUB_TOKEN
     fi
     if [[ -e "$marker" ]]; then
@@ -113,6 +159,21 @@ check_first_login() {
     else
         bad "$unit did not complete"
         journalctl --user -u "$unit" --no-pager -o cat -n 60 | indent
+    fi
+    # systemd logs what each run used when it stops; the last one is the run
+    # that completed.
+    local used
+    used="$(journalctl --user -u "$unit" --no-pager -o cat \
+        | sed -n 's/^.*: Consumed //p' | tail -n1)"
+    echo "      used: ${used:-?}"
+    metric "first-login run" "${used:-?}"
+    local anon_max high_max samples
+    wait_for 30 bash -c '! systemctl --user is-active -q boot-test-memory.service'
+    if read -r anon_max high_max samples 2>/dev/null <"$memory_samples"; then
+        metric "first-login largest anonymous memory" \
+            "$(( anon_max / 1048576 ))M (sampled each second, $samples samples); MemoryHigh=$(systemctl --user show -P MemoryHigh "$unit"), reclaimed for going over it $high_max times"
+    else
+        warn "no memory samples of $unit in $memory_samples"
     fi
     failed_units --user
 }
@@ -314,6 +375,9 @@ case "$phase" in
         ;;
     desktop)
         check_desktop
+        ;;
+    sample)
+        sample_first_login
         ;;
     *)
         echo "unknown phase $phase" >&2; exit 2 ;;

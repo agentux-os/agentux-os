@@ -88,6 +88,10 @@ run() {
     # SSH connections; otherwise each disconnect stops it.
     vm "sudo loginctl enable-linger $user"
     vm 'cat >/var/tmp/boot.sh && chmod +x /var/tmp/boot.sh' <"$here/boot.sh"
+    # first-login is running by now; sample its memory in the background
+    # (the system checks report it).
+    vm 'systemd-run --user --quiet --unit=boot-test-memory /var/tmp/boot.sh sample' </dev/null \
+        || echo "::warning::could not start the first-login memory sampler"
 
     # The first boot screen: the greeter, or plasma-setup's first-boot wizard.
     vm 'timeout 300 bash -c "until systemctl is-active -q display-manager.service; do sleep 5; done"' || true
@@ -249,12 +253,17 @@ summary_phase() {
     n_fail="$(grep -c '^FAIL ' "$log" || true)"
     n_warn="$(grep -c '^warn ' "$log" || true)"
     summary_line "$name" "$([[ "$rc" == 0 ]] && echo ok || echo "FAIL (exit $rc)"): $n_ok ok, $n_fail failed, $n_warn warnings"
+    # Measurements (e.g. first-login's memory peak) get a row each.
+    local metric
+    while IFS= read -r metric; do
+        summary_line "${metric%%: *}" "${metric#*: }"
+    done < <(sed -n 's/^metric  //p' "$log")
     {
         echo
         echo "<details><summary>$name</summary>"
         echo
         echo '```'
-        grep -E '^(ok|FAIL|warn) |^== ' "$log" || true
+        grep -E '^(ok|FAIL|warn|metric) |^== ' "$log" || true
         echo '```'
         echo "</details>"
         echo

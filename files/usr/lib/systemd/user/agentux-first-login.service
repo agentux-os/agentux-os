@@ -1,16 +1,31 @@
 [Unit]
 Description=Install AgentUX per-user tools (agent CLIs, dev tools)
-Wants=network-online.target
-After=network-online.target
 ConditionPathExists=!%S/agentux/first-login.done
 # Only for people: a system user with a session of its own, like
 # plasma-setup running the first-boot wizard, must not download several GB of
 # agent CLIs into its tmpfs home.
 ConditionUser=!@system
+# network-online.target exists only in the system manager, so a user unit
+# cannot order itself after it; ExecStartPre below waits for the network
+# instead. Retries within a session are bounded: at most 4 starts per hour,
+# after that the unit stays failed until the next login.
+StartLimitIntervalSec=1h
+StartLimitBurst=4
 
 [Service]
 Type=oneshot
+# Wait up to a minute for NetworkManager to have a connection up. Offline, the
+# unit fails and is retried below, and again on the next login.
+ExecStartPre=/usr/bin/nm-online -q -t 60
 ExecStart=/usr/libexec/agentux/first-login
+Restart=on-failure
+RestartSec=5min
+# The downloads (the Antigravity ACP server alone is ~334 MB, ~1 GB unpacked)
+# fill the page cache, all of it charged to this unit: its memory peak was
+# 3.8 GB, of which at most ~0.4 GB was the installers' own (anonymous)
+# memory. Above this soft limit the kernel reclaims the unit's cache instead
+# of pushing the desktop session's memory out; nothing is killed.
+MemoryHigh=1G
 
 [Install]
 WantedBy=default.target
