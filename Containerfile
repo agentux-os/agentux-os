@@ -29,9 +29,9 @@ RUN dnf -y install \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the Plasma overlay checksum.
-ARG AGENTUX_CORE_VERSION=0.3.0
-ARG AGENTUX_DESKTOP_VERSION=0.3.0
-ARG AGENTUX_PLASMA_SHA256=0d1d81d3e2a4202712358847837e409a27368963c91da47d7c3cd2f48676b7cb
+ARG AGENTUX_CORE_VERSION=0.4.0
+ARG AGENTUX_DESKTOP_VERSION=0.4.0
+ARG AGENTUX_PLASMA_SHA256=cf82bc5c343a11a7382215ac3b083f085e4c663eb8449bfc8ac85a3212142c30
 
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
 # cockpit, and the Plasma 6 defaults overlay (usr/ and etc/, relative to /),
@@ -52,12 +52,15 @@ RUN core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTU
 COPY files/ /
 
 # agentuxd runs as a user service for every user, like first-login. Fail the
-# build if the packaged unit ever points at a binary that isn't there, or if
-# nm-online (NetworkManager), which first-login waits for the network with,
-# goes missing.
+# build if the packaged unit ever points at a binary that isn't there, or
+# stops skipping system users (ConditionUser=!@system, packaged since
+# agentux-core 0.4.0: the user managers of system users with a session, like
+# plasma-setup's first-boot wizard, must not start it), or if nm-online
+# (NetworkManager), which first-login waits for the network with, goes missing.
 RUN chmod 0755 /usr/libexec/agentux/first-login \
     && exec_start="$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' /usr/lib/systemd/user/agentuxd.service)" \
     && test -x "$exec_start" \
+    && grep -qx 'ConditionUser=!@system' /usr/lib/systemd/user/agentuxd.service \
     && test -x /usr/bin/nm-online \
     && systemctl --global enable agentux-first-login.service agentuxd.service
 

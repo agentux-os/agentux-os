@@ -1,13 +1,17 @@
 #!/usr/bin/bash
 # Boot test checks, run inside a booted AgentUX VM as the test user (over SSH,
 # with passwordless sudo) by tests/boot-vm.sh:
-#   boot.sh system   the booted image, system and user units, first login,
-#                    agentuxd and an end-to-end run with fake agents
-#   boot.sh desktop  after an autologin reboot: the Plasma session and the
-#                    cockpit (reported, but boot-vm.sh does not fail on them)
+#   boot.sh system   the booted image, system and user units, the first-boot
+#                    wizard's session, first login, agentuxd, an end-to-end
+#                    run with fake agents and one with checks in rootless
+#                    Podman (that one only warns)
+#   boot.sh desktop  after an autologin reboot: the Plasma session, the
+#                    cockpit and no Welcome Center (reported, but boot-vm.sh
+#                    does not fail on them)
 #   boot.sh sample   samples first-login's memory until it completed (run in
 #                    the background from the first SSH login)
-# EXPECTED_IMAGE is the image reference the system should have booted. An
+# EXPECTED_IMAGE is the image reference the system should have booted, and
+# EXPECTED_AUX_VERSION the agentux-core version `aux --version` should report. An
 # optional GITHUB_TOKEN is used only to retry a failed first login (mise
 # resolves versions through the GitHub API, which CI runners share).
 set -uo pipefail
@@ -185,7 +189,9 @@ check_system_users() {
     echo "== AgentUX user units only run for regular users"
     local uid_min unit uids u
     uid_min="$(awk '$1 == "UID_MIN" {print $2}' /etc/login.defs)"
-    for unit in agentux-first-login.service agentuxd.service 'app-agentux\x2dcockpit@autostart.service'; do
+    # The cockpit's autostart unit starts for every graphical session and its
+    # wrapper exits for system users; check_wizard_session covers it.
+    for unit in agentux-first-login.service agentuxd.service; do
         # Only "Starting/Started" count; a manager whose condition check
         # skipped the unit logs that under USER_UNIT too.
         uids="$(sudo journalctl -b -o json USER_UNIT="$unit" \
@@ -198,13 +204,90 @@ check_system_users() {
         done
         if (( ${#system_uids[@]} == 0 )); then
             ok "$unit ran only for UIDs >= ${uid_min:-1000} [${uids:-none}]"
-        elif [[ "$unit" == app-* ]]; then
-            # The cockpit autostart comes from agentux-desktop's Plasma overlay.
-            warn "$unit also started for system users: ${system_uids[*]}"
         else
             bad "$unit also ran for system users: ${system_uids[*]}"
         fi
     done
+}
+
+# The first-boot wizard runs a full Plasma session as the system user
+# plasma-setup (UID 968), still logged in while these checks run. Its XDG
+# autostart starts the cockpit's unit there too; agentux-desktop's wrapper
+# (/usr/libexec/agentux-cockpit-autostart) logs that it skips system users and
+# exits 0, so nothing of AgentUX runs over the wizard.
+check_wizard_session() {
+    echo "== first-boot wizard session (system user plasma-setup)"
+    local wuid manager unit='app-agentux\x2dcockpit@autostart.service' out proc
+    wuid="$(id -u plasma-setup 2>/dev/null)"
+    if [[ -z "$wuid" ]] || ! loginctl show-user "$wuid" >/dev/null 2>&1; then
+        bad "no session of plasma-setup (the first-boot wizard) on this boot"
+        loginctl list-sessions --no-legend | indent
+        return
+    fi
+    echo "      plasma-setup is UID $wuid"
+    manager=(sudo systemctl --user --machine=plasma-setup@)
+
+    # The wrapper's own line (the unit's stderr) and the user manager's
+    # messages about the unit.
+    out="$(sudo journalctl -b --no-pager -o cat _UID="$wuid" _SYSTEMD_USER_UNIT="$unit" \
+        + _UID="$wuid" USER_UNIT="$unit" 2>&1)"
+    if grep -q 'agentux-cockpit: not starting for system user' <<<"$out"; then
+        ok "$unit logged \"agentux-cockpit: not starting for system user\" for UID $wuid  [$(grep -m1 'not starting' <<<"$out")]"
+    else
+        bad "$unit did not log \"agentux-cockpit: not starting for system user\" for UID $wuid"
+        indent <<<"$out"
+    fi
+    local props
+    props="$("${manager[@]}" show -p Result -p ExecMainStatus -p ActiveState -p ExecMainExitTimestamp "$unit" 2>&1)"
+    if grep -qx 'Result=success' <<<"$props" && grep -qx 'ExecMainStatus=0' <<<"$props" \
+        && grep -q '^ExecMainExitTimestamp=.\+' <<<"$props"; then
+        ok "$unit exited successfully for UID $wuid  [$(tr '\n' ' ' <<<"$props")]"
+    elif grep -q 'Deactivated successfully' <<<"$out" && ! grep -q 'Failed with result' <<<"$out"; then
+        ok "$unit exited successfully for UID $wuid (journal)"
+    else
+        bad "$unit did not exit successfully for UID $wuid"
+        indent <<<"$props"
+    fi
+
+    out="$("${manager[@]}" --failed --plain --no-legend 2>&1)"
+    if [[ $? -eq 0 && -z "$out" ]]; then
+        ok "no failed unit in plasma-setup's user manager"
+    else
+        bad "failed units in plasma-setup's user manager (or it could not be asked)"
+        indent <<<"$out"
+    fi
+
+    for proc in agentux-cockpit agentuxd; do
+        if out="$(pgrep -a -u "$wuid" -x "$proc")"; then
+            bad "$proc runs as UID $wuid"; indent <<<"$out"
+        else
+            ok "$proc not running as UID $wuid"
+        fi
+    done
+    if out="$(pgrep -a -u "$wuid" -f /usr/libexec/agentux/first-login)"; then
+        bad "first-login runs as UID $wuid"; indent <<<"$out"
+    else
+        ok "first-login not running as UID $wuid"
+    fi
+    for unit in agentuxd.service agentux-first-login.service; do
+        out="$("${manager[@]}" is-active "$unit" 2>&1)"
+        if [[ "$out" == active || "$out" == activating ]]; then
+            bad "$unit is $out in plasma-setup's user manager"
+        else
+            ok "$unit not active in plasma-setup's user manager  [$out]"
+        fi
+    done
+}
+
+# agentux-desktop's Plasma overlay: the login screen's AgentUX defaults.
+check_desktop_files() {
+    echo "== AgentUX Plasma defaults on disk"
+    assert "login screen config /usr/lib/plasmalogin/plasmalogin.conf.d/50-agentux.conf" \
+        test -f /usr/lib/plasmalogin/plasmalogin.conf.d/50-agentux.conf
+    assert "cockpit autostart wrapper /usr/libexec/agentux-cockpit-autostart" \
+        test -x /usr/libexec/agentux-cockpit-autostart
+    assert "/etc/xdg/kded5rc turns kded_plasma_welcome off" \
+        bash -c "grep -qx '\[Module-kded_plasma_welcome\]' /etc/xdg/kded5rc && grep -qx 'autoload=false' /etc/xdg/kded5rc"
 }
 
 check_user_path() {
@@ -245,21 +328,50 @@ check_agentuxd() {
     fi
 }
 
+check_aux_version() {
+    echo "== aux version"
+    local v
+    v="$(aux --version 2>&1)"
+    if [[ -z "${EXPECTED_AUX_VERSION:-}" ]]; then
+        ok "aux --version  [$v] (no expected version given)"
+    elif [[ "$v" =~ (^|[[:space:]])v?${EXPECTED_AUX_VERSION//./\\.}([[:space:]]|$) ]]; then
+        ok "aux --version reports $EXPECTED_AUX_VERSION  [$v]"
+    else
+        bad "aux --version is '$v', expected $EXPECTED_AUX_VERSION"
+    fi
+}
+
+# Starts `aux daemon --fake-agents` on a socket under $1; sets daemon_pid and
+# sock. Fails (and says why) if the socket does not show up.
+start_fake_daemon() {
+    local tmp="$1"
+    sock="$tmp/run/agentuxd.sock"
+    aux --socket "$sock" daemon --database "$tmp/state/agentuxd.db" --fake-agents \
+        </dev/null >"$tmp/daemon.log" 2>&1 &
+    daemon_pid=$!
+    if ! wait_for 30 test -S "$sock"; then
+        bad "fake-agents daemon socket"; indent <"$tmp/daemon.log"
+        kill "$daemon_pid" 2>/dev/null
+        return 1
+    fi
+}
+
+# Commits everything in the git repository $1 as its first commit.
+init_repo() {
+    git -C "$1" init --quiet --initial-branch=main
+    git -C "$1" add .
+    git -C "$1" -c user.name="AgentUX Boot Test" -c user.email=boot-test@agentux.invalid \
+        commit --quiet --message=init
+}
+
 # A run through a second daemon with fake agents on a temporary socket: plan
 # (with approval), implement, a gate check and a pull request.
 check_fake_run() {
     echo "== end-to-end run with fake agents (aux daemon --fake-agents)"
     local tmp sock repo run_id ps request watched daemon_pid
     tmp="$(mktemp -d)"
-    sock="$tmp/run/agentuxd.sock"
     repo="$tmp/repo"
-    aux --socket "$sock" daemon --database "$tmp/state/agentuxd.db" --fake-agents \
-        </dev/null >"$tmp/daemon.log" 2>&1 &
-    daemon_pid=$!
-    if ! wait_for 30 test -S "$sock"; then
-        bad "fake-agents daemon socket"; indent <"$tmp/daemon.log"
-        kill "$daemon_pid" 2>/dev/null; return
-    fi
+    start_fake_daemon "$tmp" || return
     mkdir -p "$repo"
     cat >"$repo/agentux.yaml" <<'EOF'
 version: 1
@@ -279,10 +391,7 @@ pipeline:
     checks: [check]
   - step: pull_request
 EOF
-    git -C "$repo" init --quiet --initial-branch=main
-    git -C "$repo" add .
-    git -C "$repo" -c user.name="AgentUX Boot Test" -c user.email=boot-test@agentux.invalid \
-        commit --quiet --message=init
+    init_repo "$repo"
 
     if ! run_id="$(aux --socket "$sock" run "$repo" --prompt "Boot test run" 2>"$tmp/run.err")"; then
         bad "aux run"; indent <"$tmp/run.err"
@@ -308,6 +417,114 @@ EOF
     wait "$daemon_pid" 2>/dev/null
     if (( fail )); then echo "      daemon log:"; indent <"$tmp/daemon.log"; fi
     rm -rf "$tmp"
+}
+
+# Checks in rootless Podman (isolation.mode: podman, ADR 0009 in
+# agentux-os/agentux) on Kinoite with SELinux enforcing. `aux validate` is a
+# check; the isolated gate run is a finding: it only warns, with its logs.
+check_podman_isolation() {
+    echo "== checks isolated in rootless Podman (isolation.mode: podman)"
+    local tmp sock repo run_id watched daemon_pid out
+    local image=registry.fedoraproject.org/fedora-minimal:44
+    tmp="$(mktemp -d)"
+    repo="$tmp/repo"
+    mkdir -p "$repo"
+    cat >"$repo/agentux.yaml" <<EOF
+version: 1
+isolation:
+  mode: podman
+  image: $image
+roles:
+  implementer:
+    harness: fake
+checks:
+  - name: check
+    run: "true"
+pipeline:
+  - step: implement
+    role: implementer
+  - step: gate
+    checks: [check]
+EOF
+    init_repo "$repo"
+    if out="$(aux validate "$repo" 2>&1)" && grep -qi podman <<<"$out" && grep -qF "$image" <<<"$out"; then
+        ok "aux validate: checks run in podman with $image"
+    else
+        bad "aux validate does not show podman isolation with $image"
+    fi
+    indent <<<"$out"
+
+    echo "      podman: $(podman --version 2>&1); SELinux: $(getenforce 2>&1)"
+    echo "      /etc/subuid: $(grep "^$USER:" /etc/subuid 2>&1 || echo "no entry for $USER")"
+    echo "      /etc/subgid: $(grep "^$USER:" /etc/subgid 2>&1 || echo "no entry for $USER")"
+    echo "      podman info: $(podman info --format 'rootless={{.Host.Security.Rootless}} selinux={{.Host.Security.SELinuxEnabled}} graphDriver={{.Store.GraphDriverName}} network={{.Host.NetworkBackend}} cgroups={{.Host.CgroupsVersion}}' 2>&1 | head -n3)"
+
+    start_fake_daemon "$tmp" || { rm -rf "$tmp"; return; }
+    local isolated_ok=0
+    if ! run_id="$(aux --socket "$sock" run "$repo" --prompt "Boot test isolated gate" 2>"$tmp/run.err")"; then
+        warn "aux run (podman isolation) did not start"; indent <"$tmp/run.err"
+    else
+        echo "      run $run_id started; waiting up to 15 minutes (the image is pulled first)"
+        if watched="$(timeout 900 aux --socket "$sock" watch "$run_id" 2>&1)" \
+            && grep -q '\[done\]' <<<"$watched"; then
+            ok "isolated gate: run $run_id done"
+            isolated_ok=1
+        else
+            warn "isolated gate: run $run_id did not reach done"
+        fi
+        indent <<<"$watched"
+    fi
+    kill "$daemon_pid" 2>/dev/null
+    wait "$daemon_pid" 2>/dev/null
+    if (( ! isolated_ok )); then
+        echo "      daemon log:"; indent <"$tmp/daemon.log"
+        echo "      podman ps -a:"; podman ps -a 2>&1 | indent
+        echo "      podman images:"; podman images 2>&1 | indent
+        echo "      a check by hand (the same podman run as ADR 0009):"
+        local wt="$tmp/manual"
+        git -C "$repo" worktree add --quiet "$wt" 2>&1 | indent
+        podman run --rm --pull=missing --userns=keep-id --security-opt=no-new-privileges --network=none \
+            -v "$wt:$wt:Z" -v "$repo/.git:$repo/.git:ro,z" -w "$wt" "$image" \
+            sh -c 'id; git --version 2>&1; ls -la' 2>&1 | indent
+        echo "      SELinux denials (ausearch -m avc, this boot):"
+        sudo ausearch -m avc -ts boot 2>&1 | tail -n 30 | indent
+    fi
+    podman rmi --force "$image" >/dev/null 2>&1 || true
+    rm -rf "$tmp" 2>/dev/null || podman unshare rm -rf "$tmp" 2>/dev/null || true
+}
+
+# The Welcome Center (plasma-welcome) is off in the test user's session: the
+# kded module that opens it is not loaded and nothing launched it.
+check_no_welcome() {
+    local out modules bus="unix:path=$XDG_RUNTIME_DIR/bus"
+    if out="$(pgrep -a -u "$USER" -x plasma-welcome)"; then
+        bad "plasma-welcome is running"; indent <<<"$out"
+    else
+        ok "plasma-welcome not running"
+    fi
+    out="$(journalctl --user -b --no-pager -o cat 2>&1 \
+        | grep -F -e 'Launching Welcome Center' -e 'app-org.kde.plasma\x2dwelcome@')"
+    if [[ -z "$out" ]]; then
+        ok "user journal: no \"Launching Welcome Center\", no app-org.kde.plasma\\x2dwelcome@*.service"
+    else
+        bad "user journal shows the Welcome Center starting"; indent <<<"$out"
+    fi
+    list_kded_modules() {
+        if command -v qdbus6 >/dev/null; then
+            DBUS_SESSION_BUS_ADDRESS="$bus" qdbus6 org.kde.kded6 /kded org.kde.kded6.loadedModules
+        else
+            busctl --user call org.kde.kded6 /kded org.kde.kded6 loadedModules
+        fi
+    }
+    if wait_for 60 list_kded_modules && modules="$(list_kded_modules 2>&1)" && [[ -n "$modules" ]]; then
+        if grep -q kded_plasma_welcome <<<"$modules"; then
+            bad "kded6 loaded kded_plasma_welcome"
+        else
+            ok "kded6 has not loaded kded_plasma_welcome  [$(wc -w <<<"$modules") words of loadedModules]"
+        fi
+    else
+        bad "could not list kded6's loaded modules"; indent <<<"$(list_kded_modules 2>&1)"
+    fi
 }
 
 # Prints the test user's Wayland session id, if there is one.
@@ -350,6 +567,13 @@ check_desktop() {
             *) bad "cockpit PATH lacks ~/.local/bin: $cockpit_path" ;;
         esac
     fi
+    # For a regular user the autostart wrapper execs the cockpit, so its unit
+    # stays active.
+    assert 'app-agentux\x2dcockpit@autostart.service active' \
+        systemctl --user is-active 'app-agentux\x2dcockpit@autostart.service'
+    # The Welcome Center would open some seconds into the session.
+    sleep 20
+    check_no_welcome
     local laf
     laf="$(kreadconfig6 --group KDE --key LookAndFeelPackage 2>&1)"
     if [[ "$laf" == os.agentux.desktop ]]; then
@@ -369,9 +593,13 @@ case "$phase" in
         check_system
         check_first_login
         check_system_users
+        check_wizard_session
+        check_desktop_files
+        check_aux_version
         check_user_path
         check_agentuxd
         check_fake_run
+        check_podman_isolation
         ;;
     desktop)
         check_desktop
