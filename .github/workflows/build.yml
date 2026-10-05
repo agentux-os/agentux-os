@@ -10,21 +10,33 @@ on:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/agentux
+  # Pushes from main (push, schedule, dispatch) publish a dated tag and,
+  # once signed and verified, :latest. A dispatch from any other branch
+  # (gh workflow run build.yml --ref <branch>) pushes only test-<sha> (and
+  # its per-architecture test-<sha>-<arch>) to exercise signing and the
+  # policy, and never touches :latest or a dated tag.
+  PUBLISH: ${{ github.event_name != 'pull_request' }}
+  RELEASE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+  # One native build per architecture: no QEMU emulation, so the arm64 image
+  # is built (and its RPM scriptlets run) on real aarch64. Each leg pushes its
+  # image under a staging tag (ci-staging-<arch> from main, test-<sha>-<arch>
+  # otherwise) and hands its digest to `publish`, which only works by digest.
+  image:
+    name: image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-      id-token: write # keyless signing with this workflow's OIDC identity
-    env:
-      # Pushes from main (push, schedule, dispatch) publish a dated tag and,
-      # once signed and verified, :latest. A dispatch from any other branch
-      # (gh workflow run build.yml --ref <branch>) pushes only test-<sha> to
-      # exercise signing and the policy, and never touches :latest.
-      PUBLISH: ${{ github.event_name != 'pull_request' }}
-      RELEASE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,38 +44,112 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
       - name: Build
-        run: podman build --tag agentux:ci .
+        run: |
+          podman build --tag agentux:ci .
+          test "$(podman image inspect --format '{{.Architecture}}' agentux:ci)" = "${{ matrix.arch }}"
 
       - name: Push
-        id: push
         if: env.PUBLISH == 'true'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          echo "$TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
+          if [ "$RELEASE" = true ]; then stage=ci-staging; else stage="test-${GITHUB_SHA::12}"; fi
+          mkdir -p "$RUNNER_TEMP/digests"
+          podman push --digestfile "$RUNNER_TEMP/digests/$ARCH" agentux:ci "docker://${IMAGE}:${stage}-${ARCH}"
+          echo "pushed ${IMAGE}:${stage}-${ARCH}@$(cat "$RUNNER_TEMP/digests/$ARCH")"
+
+      - uses: actions/upload-artifact@v4
+        if: env.PUBLISH == 'true'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/${{ matrix.arch }}
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
+  # Joins the per-architecture images into one manifest list, signs the list
+  # and every image in it, checks the signatures with cosign and with the
+  # policy the image ships (for each architecture), and only then moves the
+  # public tags to the list, digest unchanged.
+  publish:
+    needs: image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # Main's runs share the ci-staging tags; one at a time.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # keyless signing with this workflow's OIDC identity
+    steps:
+      - uses: actions/checkout@v4
+
+      # The policy check below pulls whole images, twice per architecture.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+            /usr/local/.ghcup /usr/local/share/powershell /usr/local/julia* \
+            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+          sudo docker image prune --all --force
+          df -h / /mnt
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - name: Create the manifest list
+        id: list
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "$TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
-          # cosign reads Docker's credential file, not Podman's.
+          # cosign and buildx read Docker's credential file, not Podman's.
           echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
-          if [ "$RELEASE" = true ]; then
-            tag="$(date -u +%Y%m%d)"
-          else
-            tag="test-${GITHUB_SHA::12}"
-          fi
-          podman push --digestfile "$RUNNER_TEMP/digest" agentux:ci "docker://${IMAGE}:${tag}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "digest=$(cat "$RUNNER_TEMP/digest")" >> "$GITHUB_OUTPUT"
+          amd64="$(cat "$RUNNER_TEMP/digests/amd64")"
+          arm64="$(cat "$RUNNER_TEMP/digests/arm64")"
+          if [ "$RELEASE" = true ]; then tag=ci-staging; else tag="test-${GITHUB_SHA::12}"; fi
+          # imagetools references the pushed images as they are: their
+          # digests, and so their signatures, stay valid inside the list.
+          docker buildx imagetools create --tag "${IMAGE}:${tag}" \
+            "${IMAGE}@${amd64}" "${IMAGE}@${arm64}"
+          skopeo inspect --raw "docker://${IMAGE}:${tag}" > "$RUNNER_TEMP/list.json"
+          digest="sha256:$(sha256sum "$RUNNER_TEMP/list.json" | cut -d' ' -f1)"
+          raw="$(cat "$RUNNER_TEMP/list.json")"
+          jq . <<<"$raw"
+          # Exactly the two images, each under its own platform.
+          for pair in "amd64=$amd64" "arm64=$arm64"; do
+            jq -e --arg a "${pair%%=*}" --arg d "${pair#*=}" \
+              '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)] | length == 1 and .[0].digest == $d' \
+              <<<"$raw" > /dev/null || { echo "::error::the list has no linux/${pair%%=*} entry with ${pair#*=}"; exit 1; }
+          done
+          jq -e '.manifests | length == 2' <<<"$raw" > /dev/null
+          {
+            echo "tag=$tag"
+            echo "digest=$digest"
+            echo "amd64=$amd64"
+            echo "arm64=$arm64"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: sigstore/cosign-installer@v4.1.2
-        if: env.PUBLISH == 'true'
 
-      # Two signatures on the same digest, both in the classic .sig tag that
-      # containers/image reads (hence no new bundle format): a keyless one,
-      # tied to this workflow by Fulcio and Rekor, for `cosign verify`; and
-      # one with the AgentUX key, the only kind the policy installed systems
-      # enforce can check.
+      # Two signatures on each digest (the list and both images), all in the
+      # classic .sig tag that containers/image reads (hence no new bundle
+      # format): a keyless one, tied to this workflow by Fulcio and Rekor, for
+      # `cosign verify`; and one with the AgentUX key, the only kind the
+      # policy installed systems enforce can check. containers/image checks
+      # the signature of the image it picks from the list for its
+      # architecture, not the list's, so every image is signed explicitly.
       - name: Sign
-        if: env.PUBLISH == 'true'
         env:
-          REF: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          DIGESTS: ${{ steps.list.outputs.digest }} ${{ steps.list.outputs.amd64 }} ${{ steps.list.outputs.arm64 }}
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: |
@@ -72,50 +158,115 @@ jobs:
             exit 1
           fi
           legacy=(--new-bundle-format=false --use-signing-config=false)
-          cosign sign --yes "${legacy[@]}" "$REF"
-          cosign sign --yes "${legacy[@]}" --key env://COSIGN_PRIVATE_KEY "$REF"
+          for digest in $DIGESTS; do
+            cosign sign --yes "${legacy[@]}" "${IMAGE}@${digest}"
+            cosign sign --yes "${legacy[@]}" --key env://COSIGN_PRIVATE_KEY "${IMAGE}@${digest}"
+          done
 
       - name: Verify with cosign
-        if: env.PUBLISH == 'true'
         env:
-          REF: ${{ env.IMAGE }}@${{ steps.push.outputs.digest }}
+          DIGESTS: ${{ steps.list.outputs.digest }} ${{ steps.list.outputs.amd64 }} ${{ steps.list.outputs.arm64 }}
           IDENTITY: https://github.com/${{ github.workflow_ref }}
         run: |
-          cosign verify --key files/etc/pki/containers/agentux-os.pub "$REF" > /dev/null
-          cosign verify "$REF" \
-            --certificate-identity "$IDENTITY" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          for digest in $DIGESTS; do
+            cosign verify --key files/etc/pki/containers/agentux-os.pub "${IMAGE}@${digest}" > /dev/null
+            cosign verify "${IMAGE}@${digest}" \
+              --certificate-identity "$IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+            echo "${IMAGE}@${digest}: key and keyless signatures verified"
+          done
 
       # The check that matters: what an installed system's `bootc upgrade`
-      # would do with the policy shipped in this very image. An unsigned image
-      # in the same repository must be refused.
+      # would do with the policy shipped in this very image, once per
+      # architecture (skopeo --override-arch picks that architecture's image
+      # from the list, as a system of that architecture would). An unsigned
+      # image in the same repository must be refused.
       - name: Verify with the shipped policy
-        if: env.PUBLISH == 'true'
         env:
           AUTHFILE: ${{ runner.temp }}/auth.json
           WORKDIR: /mnt/sigpolicy
+          TAG: ${{ steps.list.outputs.tag }}
+          DIGEST: ${{ steps.list.outputs.digest }}
+          AMD64: ${{ steps.list.outputs.amd64 }}
         run: |
           cp "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/containers/auth.json" "$AUTHFILE"
           sudo install -d -o "$(id -u)" -g "$(id -g)" "$WORKDIR"
           skopeo copy --quiet docker://quay.io/libpod/alpine:latest "docker://${IMAGE}:ci-unsigned"
-          tests/sigpolicy.sh agentux:ci "$IMAGE" "${{ steps.push.outputs.digest }}" \
-            "${{ steps.push.outputs.tag }}" ci-unsigned
+          podman pull --quiet "${IMAGE}@${AMD64}"
+          podman tag "${IMAGE}@${AMD64}" agentux:ci
+          for arch in amd64 arm64; do
+            echo "::group::linux/$arch"
+            ARCH="$arch" tests/sigpolicy.sh agentux:ci "$IMAGE" "$DIGEST" "$TAG" ci-unsigned
+            echo "::endgroup::"
+          done
 
-      - name: Tag latest
+      - name: Tag the release
         if: env.RELEASE == 'true'
         env:
-          DIGEST: ${{ steps.push.outputs.digest }}
+          DIGEST: ${{ steps.list.outputs.digest }}
         run: |
-          skopeo copy --quiet --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:latest"
-          test "$(skopeo inspect --format '{{.Digest}}' "docker://${IMAGE}:latest")" = "$DIGEST"
+          for tag in "$(date -u +%Y%m%d)" latest; do
+            skopeo copy --quiet --all --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:${tag}"
+            test "$(skopeo inspect --raw "docker://${IMAGE}:${tag}" | sha256sum | cut -d' ' -f1)" = "${DIGEST#sha256:}"
+            echo "${IMAGE}:${tag} -> ${DIGEST}"
+          done
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.list.outputs.tag }}
+          DIGEST: ${{ steps.list.outputs.digest }}
+          AMD64: ${{ steps.list.outputs.amd64 }}
+          ARM64: ${{ steps.list.outputs.arm64 }}
+        run: |
+          {
+            echo "## Published"
+            echo
+            echo "| | Digest |"
+            echo "|---|---|"
+            echo "| list (\`${TAG}\`$([ "$RELEASE" = true ] && echo ", \`$(date -u +%Y%m%d)\`, \`latest\`")) | \`${DIGEST}\` |"
+            echo "| linux/amd64 | \`${AMD64}\` |"
+            echo "| linux/arm64 | \`${ARM64}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The required check. A matrix job's checks are named "image (amd64)" and
+  # so on, so this one carries the name branch protection asks for: every
+  # architecture built and, outside pull requests, the list published.
+  build:
+    needs: [image, publish]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Check the builds
+        env:
+          IMAGE_RESULT: ${{ needs.image.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          echo "image: $IMAGE_RESULT, publish: $PUBLISH_RESULT"
+          test "$IMAGE_RESULT" = success
+          if [ "$PUBLISH" = true ]; then
+            test "$PUBLISH_RESULT" = success
+          else
+            test "$PUBLISH_RESULT" = skipped
+          fi
 
   # Boots nothing: runs the image as a plain container, does a real first
-  # login as a fresh user and checks every CLI resolves from a login shell.
-  # Rebuilding here is cheaper than shipping a multi-GB image between jobs
-  # as an artifact; the base layers come from quay.io's CDN either way.
+  # login as a fresh user and checks every CLI resolves from a login shell,
+  # on each architecture. Rebuilding here is cheaper than shipping a
+  # multi-GB image between jobs as an artifact; the base layers come from
+  # quay.io's CDN either way.
   smoke:
-    needs: build
-    runs-on: ubuntu-24.04
+    name: smoke (${{ matrix.arch }})
+    needs: image
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
       contents: read
@@ -140,7 +291,7 @@ jobs:
         if: always()
         run: |
           if [[ -f "$RUNNER_TEMP/smoke/summary.md" ]]; then
-            { echo "## AgentUX smoke test"; echo; cat "$RUNNER_TEMP/smoke/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
+            { echo "## AgentUX smoke test (${{ matrix.arch }})"; echo; cat "$RUNNER_TEMP/smoke/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   lint:

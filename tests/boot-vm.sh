@@ -10,12 +10,20 @@
 #       check it booted IMAGE, screenshot the login screen, then reboot into
 #       Plasma with autologin for the desktop checks. Logs, screenshots and summary.md go to DIR.
 #
-# Needs qemu-system-x86_64 with KVM, qemu-img, OVMF, ssh and python3. Only the
-# system checks decide the exit status; the desktop ones are best effort.
+# Needs QEMU for the host's architecture with KVM (qemu-system-x86_64 and OVMF
+# on x86_64, qemu-system-aarch64 and AAVMF on aarch64), qemu-img, ssh and
+# python3. The VM has the host's architecture. Only the system checks decide
+# the exit status; the desktop ones are best effort.
 set -euo pipefail
 
 user=boottest
 here="$(cd "$(dirname "$0")" && pwd)"
+machine="$(uname -m)"
+case "$machine" in
+    x86_64) serial=ttyS0 ;;
+    aarch64) serial=ttyAMA0 ;;
+    *) echo "unsupported architecture $machine" >&2; exit 1 ;;
+esac
 
 config() {
     local dir="$1"
@@ -33,7 +41,7 @@ key = "$(cat "$dir/id_ed25519.pub")"
 groups = ["wheel"]
 
 [customizations.kernel]
-append = "systemd.wants=sshd.service console=tty0 console=ttyS0,115200"
+append = "systemd.wants=sshd.service console=tty0 console=$serial,115200"
 EOF
     echo "wrote $dir/config.toml"
 }
@@ -42,28 +50,36 @@ run() {
     local disk="$1" image="$2"
     dir="$(mkdir -p "$3" && cd "$3" && pwd)"
     port="${BOOT_TEST_SSH_PORT:-2222}"
-    local code="" vars=""
-    for pair in /usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd \
-                /usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd \
-                /usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd; do
+    local code="" vars="" firmware qemu vm_machine display
+    if [[ "$machine" = aarch64 ]]; then
+        firmware=(/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd
+                  /usr/share/edk2/aarch64/QEMU_EFI-pflash.raw:/usr/share/edk2/aarch64/vars-template-pflash.raw)
+        qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host display=virtio-gpu-pci
+    else
+        firmware=(/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd
+                  /usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd
+                  /usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd)
+        qemu=qemu-system-x86_64 vm_machine=q35,accel=kvm display=virtio-vga
+    fi
+    for pair in "${firmware[@]}"; do
         if [[ -e "${pair%%:*}" && -e "${pair##*:}" ]]; then
             code="${pair%%:*}" vars="${pair##*:}"; break
         fi
     done
-    [[ -n "$code" ]] || { echo "OVMF not found; install ovmf (Debian/Ubuntu) or edk2-ovmf (Fedora)" >&2; exit 1; }
+    [[ -n "$code" ]] || { echo "UEFI firmware not found; install ovmf or qemu-efi-aarch64 (Debian/Ubuntu), edk2-ovmf or edk2-aarch64 (Fedora)" >&2; exit 1; }
     [[ -w /dev/kvm ]] || { echo "/dev/kvm is not writable; KVM is required" >&2; exit 1; }
 
     cp "$vars" "$dir/OVMF_VARS.fd"
     rm -f "$dir/vm.qcow2" "$dir"/*.png "$dir"/*.log "$dir"/*.txt "$dir/summary.md"
     qemu-img create -q -f qcow2 -F qcow2 -b "$(realpath "$disk")" "$dir/vm.qcow2"
-    qemu-system-x86_64 \
+    "$qemu" \
         -name agentux-boot-test \
-        -machine q35,accel=kvm -cpu host \
+        -machine "$vm_machine" -cpu host \
         -smp "${BOOT_TEST_CPUS:-4}" -m "${BOOT_TEST_MEMORY:-8192}" \
         -drive if=pflash,format=raw,readonly=on,file="$code" \
         -drive if=pflash,format=raw,file="$dir/OVMF_VARS.fd" \
         -drive file="$dir/vm.qcow2",if=virtio,format=qcow2 \
-        -device virtio-vga -display none \
+        -device "$display" -display none \
         -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:"$port"-:22 \
         -device virtio-rng-pci \
         -serial file:"$dir/serial.log" \
