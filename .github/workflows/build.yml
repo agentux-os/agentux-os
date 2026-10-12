@@ -54,6 +54,11 @@ jobs:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
+      # quay.io's CDN drops blob downloads now and then; pull the base with
+      # retries so `podman build` starts from a local copy.
+      - name: Pull the base image
+        run: .github/scripts/pull.sh
+
       - name: Build
         run: |
           podman build --build-arg VARIANT=${{ matrix.variant }} --tag agentux:ci .
@@ -218,7 +223,7 @@ jobs:
           cp "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/containers/auth.json" "$AUTHFILE"
           sudo install -d -o "$(id -u)" -g "$(id -g)" "$WORKDIR"
           skopeo copy --quiet docker://quay.io/libpod/alpine:latest "docker://${IMAGE}:ci-unsigned"
-          podman pull --quiet "${IMAGE}@${AMD64}"
+          .github/scripts/pull.sh "${IMAGE}@${AMD64}"
           podman tag "${IMAGE}@${AMD64}" agentux:ci
           for arch in amd64 arm64; do
             echo "::group::linux/$arch"
@@ -305,6 +310,11 @@ jobs:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
+      # quay.io's CDN drops blob downloads now and then; pull the base with
+      # retries so `podman build` starts from a local copy.
+      - name: Pull the base image
+        run: .github/scripts/pull.sh
+
       - name: Build
         run: podman build --build-arg VARIANT=${{ matrix.variant }} --tag agentux:ci .
 
@@ -331,7 +341,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck
-        run: shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/*
+        run: shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh
 
       - name: hadolint
         run: docker run --rm -v "$PWD:/src:ro" -w /src hadolint/hadolint:v2.15.1 hadolint Containerfile
