@@ -22,6 +22,7 @@ on:
       - files/**
       - tests/boot*
       - tests/splash.py
+      - .github/scripts/pull.sh
       - .github/workflows/boot.yml
 
 env:
@@ -98,7 +99,11 @@ jobs:
       # container storage, so build or pull it there.
       - name: Build image
         if: steps.kvm.outputs.ok == 'true' && startsWith(env.IMAGE, 'localhost/')
-        run: sudo podman build --tag "$IMAGE" .
+        run: |
+          # quay.io's CDN drops blob downloads now and then: pull the base
+          # with retries so the build starts from a local copy.
+          sudo .github/scripts/pull.sh
+          sudo podman build --tag "$IMAGE" .
 
       - name: Pull image
         if: steps.kvm.outputs.ok == 'true' && !startsWith(env.IMAGE, 'localhost/')
@@ -106,13 +111,13 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "$TOKEN" | sudo podman login ghcr.io --username "${{ github.actor }}" --password-stdin
-          sudo podman pull "$IMAGE"
+          sudo .github/scripts/pull.sh "$IMAGE"
 
       - name: Build qcow2
         if: steps.kvm.outputs.ok == 'true'
         run: |
           tests/boot-vm.sh config output/boot-test
-          sudo podman pull "$BIB"
+          sudo .github/scripts/pull.sh "$BIB"
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
             -v ./output/boot-test/config.toml:/config.toml:ro \

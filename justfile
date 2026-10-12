@@ -57,7 +57,7 @@ _boot-config:
 
 # Run shellcheck on the scripts and hadolint on the Containerfile
 lint:
-    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/*
+    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh
     podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile
 
 # Move the AgentUX pins in the Containerfile to the latest releases (pre-releases included, x86_64 and aarch64 RPMs required); needs gh

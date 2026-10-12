@@ -17,6 +17,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/iso.yml
+      - .github/scripts/pull.sh
       - disk_config/iso.toml
 
 env:
@@ -89,8 +90,8 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "$TOKEN" | sudo podman login ghcr.io --username "${{ github.actor }}" --password-stdin
-          sudo podman pull "$IMAGE"
-          sudo podman pull "$BIB"
+          # With retries: registry CDNs drop blob downloads now and then.
+          sudo .github/scripts/pull.sh "$IMAGE" "$BIB"
           test "$(sudo podman image inspect --format '{{.Architecture}}' "$IMAGE")" = "${{ matrix.goarch }}"
 
       - name: Build ISO
