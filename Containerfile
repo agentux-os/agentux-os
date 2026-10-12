@@ -175,6 +175,41 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y%m%d)}" \
     && gtk-update-icon-cache --force --quiet /usr/share/icons/hicolor \
     && cat /usr/lib/os-release
 
+# Fedora's Default wallpaper is AgentUX's. plasma-setup's first-boot wizard
+# hard-codes its background (a Fedora patch): wallpapers/Default/contents/
+# images_dark/ (images/ for a light theme), 5120x2880.jxl on a landscape
+# screen, 1440x2960.jxl on a portrait one, scaled to cover. In Fedora,
+# Default is a symlink (desktop-backgrounds-kde's) to the F44 package
+# (f44-backgrounds-kde's). Point it, and so Fedora -> Default too, at an
+# AgentUX package with those files, rendered here with ImageMagick (in the
+# base image, with librsvg and libjxl) from the brand's key art in
+# wallpaper/, copied from brand/art/ in agentux-os/agentux. The F44 package
+# stays as it is. Whatever else falls back to Default (the login screen
+# without its AgentUX drop-in, new wallpaper settings) gets AgentUX too.
+# `rpm -V desktop-backgrounds-kde` reports the changed symlink; that is this.
+RUN --mount=type=bind,source=wallpaper,target=/tmp/wallpaper \
+    command -v magick > /dev/null \
+    && wallpapers=/usr/share/wallpapers \
+    && pkg="$wallpapers/AgentUX-Default" \
+    && mkdir -p "$pkg/contents/images" "$pkg/contents/images_dark" \
+    && cp /tmp/wallpaper/metadata.json "$pkg/metadata.json" \
+    && for variant in light:images dark:images_dark; do \
+        svg="/tmp/wallpaper/wallpaper-${variant%%:*}.svg" \
+        && out="$pkg/contents/${variant#*:}" \
+        && magick -density 128 "$svg" -alpha off -depth 8 -quality 90 "$out/5120x2880.jxl" \
+        && magick -density 131.5556 "$svg" -alpha off -crop 1440x2960+2300+0 +repage -depth 8 -quality 90 "$out/1440x2960.jxl" \
+        && test "$(magick identify -format '%m %wx%h' "$out/5120x2880.jxl")" = "JXL 5120x2880" \
+        && test "$(magick identify -format '%m %wx%h' "$out/1440x2960.jxl")" = "JXL 1440x2960" \
+        || exit 1; \
+    done \
+    && { test -L "$wallpapers/Default" || ! test -e "$wallpapers/Default"; } \
+    && ln -sfn AgentUX-Default "$wallpapers/Default" \
+    && for f in images/5120x2880.jxl images/1440x2960.jxl images_dark/5120x2880.jxl images_dark/1440x2960.jxl; do \
+        test "$(readlink -f "$wallpapers/Default/contents/$f")" = "$pkg/contents/$f" || exit 1; \
+    done \
+    && jq -e '.KPlugin.Id == "AgentUX-Default"' "$wallpapers/Default/metadata.json" > /dev/null \
+    && ls -ld "$wallpapers/Default" "$pkg"/contents/*/*
+
 # Boot splash: the AgentUX Plymouth theme (files/usr/share/plymouth/themes/
 # agentux, a script-plugin theme; its images come from plymouth/build.py).
 # Plymouth runs from the initramfs, which in a bootc image is built here, not

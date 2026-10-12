@@ -22,6 +22,7 @@ on:
       - files/**
       - tests/boot*
       - tests/splash.py
+      - wallpaper/**
       - .github/scripts/pull.sh
       - .github/workflows/boot.yml
 
