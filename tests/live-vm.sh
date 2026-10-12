@@ -36,12 +36,12 @@ system_rc=1 install_rc=skipped
 if [[ "$machine" = aarch64 ]]; then
     firmware=(/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd
               /usr/share/edk2/aarch64/QEMU_EFI-pflash.raw:/usr/share/edk2/aarch64/vars-template-pflash.raw)
-    qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host display=virtio-gpu-pci
+    qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host display=virtio-gpu-pci,xres=1920,yres=1080
 else
     firmware=(/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd
               /usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd
               /usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd)
-    qemu=qemu-system-x86_64 vm_machine=q35,accel=kvm display=virtio-vga
+    qemu=qemu-system-x86_64 vm_machine=q35,accel=kvm display=virtio-vga,xres=1920,yres=1080
 fi
 code="" vars=""
 for pair in "${firmware[@]}"; do
@@ -225,6 +225,18 @@ set -e
 echo "::endgroup::"
 summary_phase "Live session checks" "$system_rc" "$dir/live-checks.log"
 screenshot 02-live-desktop-later
+
+# The desktop behind the cockpit: the launchers and the note (Plasma's Show
+# Desktop, toggled on and off again).
+show_desktop() {
+    # shellcheck disable=SC2016 # expanded in the VM
+    guest_cmd 30 'uid=$(id -u liveuser); runuser -u liveuser -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s "Show Desktop"' \
+        >/dev/null || echo "::warning::could not toggle Show Desktop"
+}
+show_desktop
+sleep 3
+screenshot 02-live-desktop-shown
+show_desktop
 
 # The demo's waiting run, approved: the cockpit shows it move through the
 # pipeline.

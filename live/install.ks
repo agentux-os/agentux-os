@@ -1,8 +1,8 @@
 # AgentUX live installer: what Anaconda installs from the live session
 # (live/build.sh puts this in /usr/share/agentux/live/install.ks, with the
 # image of the live system's variant, and %includes it from Anaconda's
-# interactive defaults). Everything else, disk, language, time zone and
-# account, is asked for interactively.
+# interactive defaults). Language, keyboard and disk are asked for
+# interactively; the account is created by plasma-setup's first-boot wizard.
 #
 # The image comes from the registry, not from the live system, so nothing
 # live-only ends up installed. No --no-signature-verification: the pull goes

@@ -27,7 +27,11 @@ live image="ghcr.io/agentux-os/agentux:latest":
     fi
     sudo podman build --build-arg BASE_IMAGE={{ image }} -f live/Containerfile --tag localhost/agentux-live:dev .
     mkdir -p output/live
-    sudo podman run --rm --security-opt label=disable         -v "$PWD/output/live:/output"         -v /var/lib/containers/storage:/usr/lib/containers/storage:ro         --mount type=image,source=localhost/agentux-live:dev,dst=/rootfs         {{ titanoboa }}
+    sudo podman run --rm --security-opt label=disable \
+        -v "$PWD/output/live:/output" \
+        -v /var/lib/containers/storage:/usr/lib/containers/storage:ro \
+        --mount type=image,source=localhost/agentux-live:dev,dst=/rootfs \
+        {{ titanoboa }}
     sudo chown "$(id -u):$(id -g)" output/live/*.iso
     ls -lh output/live/*.iso
 

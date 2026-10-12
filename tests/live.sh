@@ -80,7 +80,7 @@ phase_checks() {
     if [[ " $cmdline " == *" rd.live.image "* ]]; then ok "booted live (rd.live.image)"; else bad "rd.live.image not on the kernel command line"; fi
     assert "live marker /usr/share/agentux/live/marker" test -e /usr/share/agentux/live/marker
     assert "root is the live overlay" bash -c 'findmnt -n -o FSTYPE / | grep -qx overlay'
-    assert "livesys.service ran" systemctl is-active -q livesys.service
+    assert "livesys set up the live system" test -e /.liveimg-configured
     echo "      os-release: $(sed -n 's/^PRETTY_NAME=//p' /usr/lib/os-release)"
     echo "metric  RAM in use after login: $(free -m | awk '/^Mem:/ {print $3 " MiB of " $2 " MiB"}')"
     echo "metric  live overlay in RAM: $(df -m --output=used /run | tail -n1 | tr -d ' ') MiB used in /run"
@@ -204,8 +204,8 @@ user --name=installtest --password=installtest --plaintext --groups=wheel
 EOF
     echo "      kickstart:"; indent </var/tmp/install-test.ks
     local start=$SECONDS rc
-    # As liveinst would run it, minus the GUI.
-    anaconda --liveinst --cmdline --kickstart /var/tmp/install-test.ks >/var/tmp/anaconda-test.out 2>&1
+    # As liveinst would run it, minus the GUI; Anaconda wants a session bus.
+    dbus-run-session -- anaconda --liveinst --cmdline --kickstart /var/tmp/install-test.ks >/var/tmp/anaconda-test.out 2>&1
     rc=$?
     echo "metric  install time: $(( SECONDS - start ))s"
     tail -n 40 /var/tmp/anaconda-test.out | indent

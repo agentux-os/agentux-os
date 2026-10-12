@@ -142,6 +142,10 @@ touch /etc/plasma-setup-done
 # agent CLIs" on the desktop starts the unit); the Antigravity ACP server
 # (~1 GB unpacked) never runs live, see its drop-in.
 systemctl --global disable agentux-first-login.service agentux-antigravity-acp.service
+# Nothing to update or mark on a live medium: bootupd's boot-time update
+# fails there, and so does GRUB's boot-success flag.
+systemctl disable bootloader-update.service
+systemctl --global disable grub-boot-success.timer
 systemctl --global enable agentux-live-demo.service
 test ! -e /etc/systemd/user/default.target.wants/agentux-first-login.service
 test ! -e /etc/systemd/user/default.target.wants/agentux-antigravity-acp.service

@@ -12,7 +12,8 @@
 #   - "Fix the flaky login test" is approved here and runs to the end, so
 #     there is a finished run to look at.
 #
-# The gate's checks only sleep, so each run spends a few seconds in it.
+# The gate's checks only sleep, so each run spends about a minute and a half
+# in it, long enough to watch.
 # Runs once per live session; `aux ps` shows them, `aux watch <run>` follows one.
 set -euo pipefail
 
@@ -47,9 +48,9 @@ roles:
 
 checks:
   - name: lint
-    run: sleep 6
+    run: sleep 20
   - name: test
-    run: sleep 12
+    run: sleep 60
 
 pipeline:
   - step: plan
