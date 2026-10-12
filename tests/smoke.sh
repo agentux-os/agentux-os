@@ -188,7 +188,7 @@ waybar_agents() {
     chmod 0700 "$tmp"
     sock="$tmp/run/agentuxd.sock"
     # as_user with the socket; the output must be a JSON object of class $1.
-    # shellcheck disable=SC2329 # called through assert
+    # shellcheck disable=SC2317,SC2329 # called through assert
     wb_is() {
         as_user env XDG_RUNTIME_DIR="$tmp" AGENTUX_SOCKET="$sock" "$wb" </dev/null \
             | tee /dev/stderr | jq -e --arg c "$1" '.class == $c and (.text | type == "string") and (.tooltip | type == "string")'
