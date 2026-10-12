@@ -1,0 +1,296 @@
+#!/usr/bin/bash
+# Boots the AgentUX live ISO in a headless QEMU/KVM VM and tests it through
+# the QEMU guest agent the live system ships (tests/qga.py runs
+# tests/live.sh in it as root). Used by the Live ISO workflow (live.yml).
+#
+#   live-vm.sh ISO DIR
+#
+# 1. Boot the ISO (UEFI, from the CD, the VM's empty disk behind it), with
+#    screendumps every 2 s of the first two minutes (GRUB, the boot splash)
+#    in DIR/boot/.
+# 2. Wait for the live user's autologin session and check it (tests/live.sh
+#    checks): Plasma and the cockpit, agentuxd with fake agents answering
+#    `aux ps` with the demo runs, no first-login downloads; the installer
+#    launcher only warns. Screenshots of the desktop, of the demo after
+#    approving its waiting run, and of the installer opened from
+#    "Install AgentUX" (best effort).
+# 3. With LIVE_TEST_INSTALL=1 (the default): install to the VM's disk with
+#    Anaconda from the live system, unattended but with the live installer's
+#    own payload, check the installed deployment (it tracks the published
+#    image, nothing live-only in it), then boot the disk alone and screenshot
+#    its first boot. The install needs the VM to reach ghcr.io; if it fails,
+#    the job only warns, but a wrong installed system fails it.
+#
+# Logs, screenshots and summary.md go to DIR. Needs qemu-system-x86_64 (or
+# -aarch64) with KVM, UEFI firmware (ovmf / qemu-efi-aarch64), qemu-img and
+# python3. LIVE_TEST_MEMORY (MiB, default 8192) and LIVE_TEST_CPUS (4) size
+# the VM.
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")" && pwd)"
+iso="$(realpath "${1:?usage: live-vm.sh ISO DIR}")"
+dir="$(mkdir -p "${2:?usage: live-vm.sh ISO DIR}" && cd "$2" && pwd)"
+machine="$(uname -m)"
+system_rc=1 install_rc=skipped
+
+if [[ "$machine" = aarch64 ]]; then
+    firmware=(/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd
+              /usr/share/edk2/aarch64/QEMU_EFI-pflash.raw:/usr/share/edk2/aarch64/vars-template-pflash.raw)
+    qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host display=virtio-gpu-pci
+else
+    firmware=(/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd
+              /usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd
+              /usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd)
+    qemu=qemu-system-x86_64 vm_machine=q35,accel=kvm display=virtio-vga
+fi
+code="" vars=""
+for pair in "${firmware[@]}"; do
+    if [[ -e "${pair%%:*}" && -e "${pair##*:}" ]]; then
+        code="${pair%%:*}" vars="${pair##*:}"; break
+    fi
+done
+[[ -n "$code" ]] || { echo "UEFI firmware not found" >&2; exit 1; }
+[[ -w /dev/kvm ]] || { echo "/dev/kvm is not writable; KVM is required" >&2; exit 1; }
+
+rm -rf "${dir:?}/boot" "${dir:?}/installed-boot"
+rm -f "$dir"/*.png "$dir"/*.log "$dir"/*.txt "$dir/summary.md" "$dir/summary.extra"
+cp "$vars" "$dir/OVMF_VARS.fd"
+qemu-img create -q -f qcow2 "$dir/disk.qcow2" 64G
+
+# start_vm [cd]: the VM, with the ISO as its CD when asked, the disk always.
+start_vm() {
+    local cd_args=()
+    if [[ "${1:-}" == cd ]]; then
+        cd_args=(-drive "file=$iso,media=cdrom,if=none,id=cd,readonly=on"
+                 -device "scsi-cd,drive=cd,bus=scsi.0,bootindex=0")
+    fi
+    rm -f "$dir/qmp.sock" "$dir/qga.sock"
+    "$qemu" \
+        -name agentux-live-test \
+        -machine "$vm_machine" -cpu host \
+        -smp "${LIVE_TEST_CPUS:-4}" -m "${LIVE_TEST_MEMORY:-8192}" \
+        -drive if=pflash,format=raw,readonly=on,file="$code" \
+        -drive if=pflash,format=raw,file="$dir/OVMF_VARS.fd" \
+        -device virtio-scsi-pci,id=scsi \
+        "${cd_args[@]}" \
+        -drive file="$dir/disk.qcow2",if=none,id=disk,format=qcow2 \
+        -device virtio-blk-pci,drive=disk,bootindex=1 \
+        -device "$display" -display none \
+        -nic user,model=virtio-net-pci \
+        -device virtio-rng-pci \
+        -device virtio-serial-pci \
+        -chardev socket,path="$dir/qga.sock",server=on,wait=off,id=qga0 \
+        -device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0 \
+        -serial file:"$dir/serial${1:+-$1}.log" \
+        -qmp unix:"$dir/qmp.sock",server=on,wait=off \
+        -pidfile "$dir/qemu.pid" -daemonize
+}
+
+stop_vm() {
+    if [[ -n "${capture_pid:-}" ]]; then kill "$capture_pid" 2>/dev/null || true; capture_pid=""; fi
+    if [[ -S "$dir/qmp.sock" ]]; then
+        python3 "$here/qga.py" qmp "$dir/qmp.sock" '{"execute": "quit"}' 2>/dev/null || true
+    fi
+    sleep 2
+    if [[ -e "$dir/qemu.pid" ]]; then
+        kill "$(cat "$dir/qemu.pid")" 2>/dev/null || true
+    fi
+    rm -f "$dir/qemu.pid"
+}
+
+# shellcheck disable=SC2317 # called by the EXIT trap
+cleanup() {
+    stop_vm
+    rm -f "$dir/disk.qcow2" "$dir/OVMF_VARS.fd" "$dir/qmp.sock" "$dir/qga.sock"
+}
+trap cleanup EXIT
+
+screenshot() {
+    local png="$dir/$1.png"
+    if python3 "$here/qga.py" qmp "$dir/qmp.sock" \
+        "{\"execute\": \"screendump\", \"arguments\": {\"filename\": \"$png\", \"format\": \"png\"}}" \
+        && [[ -s "$png" ]]; then
+        echo "screenshot $png"
+    else
+        echo "::warning::screenshot $1 failed"
+    fi
+}
+
+# Screendumps every 2 s for $2 seconds into DIR/$1, in the background.
+capture_frames() {
+    mkdir -p "$dir/$1"
+    (
+        local i=0 end=$(( SECONDS + $2 ))
+        while (( SECONDS < end )); do
+            python3 "$here/qga.py" qmp "$dir/qmp.sock" \
+                "{\"execute\": \"screendump\", \"arguments\": {\"filename\": \"$dir/$1/$(printf %03d "$i").png\", \"format\": \"png\"}}" \
+                2>/dev/null || true
+            i=$(( i + 1 ))
+            sleep 2
+        done
+    ) &
+    capture_pid=$!
+}
+
+wait_agent() {
+    local start=$SECONDS
+    until python3 "$here/qga.py" ping "$dir/qga.sock"; do
+        if (( SECONDS - start > $1 )) || ! kill -0 "$(cat "$dir/qemu.pid" 2>/dev/null)" 2>/dev/null; then
+            return 1
+        fi
+        sleep 5
+    done
+    waited=$(( SECONDS - start ))
+}
+
+# guest PHASE TIMEOUT: runs tests/live.sh's PHASE in the VM.
+guest() {
+    python3 "$here/qga.py" exec "$dir/qga.sock" "$2" "LIVE_PHASE=$1
+$(cat "$here/live.sh")"
+}
+
+# guest_cmd TIMEOUT SCRIPT: any command in the VM, as root.
+guest_cmd() {
+    python3 "$here/qga.py" exec "$dir/qga.sock" "$1" "$2"
+}
+
+summary_line() { echo "| $1 | $2 |" >>"$dir/summary.md"; }
+
+summary_phase() {
+    local name="$1" rc="$2" log="$3" metric
+    summary_line "$name" "$([[ "$rc" == 0 ]] && echo ok || echo "FAIL (exit $rc)"): $(grep -c '^ok ' "$log" || true) ok, $(grep -c '^FAIL ' "$log" || true) failed, $(grep -c '^warn ' "$log" || true) warnings"
+    while IFS= read -r metric; do
+        summary_line "${metric%%: *}" "${metric#*: }"
+    done < <(sed -n 's/^metric  //p' "$log")
+    {
+        echo
+        echo "<details><summary>$name</summary>"
+        echo
+        echo '```'
+        grep -E '^(ok|FAIL|warn|metric) |^== ' "$log" || true
+        echo '```'
+        echo "</details>"
+    } >>"$dir/summary.extra"
+}
+
+{
+    echo "## AgentUX live ISO test"
+    echo
+    echo "ISO: \`$(basename "$iso")\` ($(du -h "$iso" | cut -f1))"
+    echo
+    echo "| Step | Result |"
+    echo "|---|---|"
+} >"$dir/summary.md"
+
+finish() {
+    [[ -e "$dir/summary.extra" ]] && cat "$dir/summary.extra" >>"$dir/summary.md"
+    rm -f "$dir/summary.extra"
+    local f names=()
+    for f in "$dir"/*.png; do [[ -e "$f" ]] && names+=("$(basename "$f")"); done
+    printf '\nScreenshots (artifact): %s; boot frames in boot/\n' "${names[*]}" >>"$dir/summary.md"
+}
+
+# ---- 1. boot ---------------------------------------------------------------
+
+start_vm cd
+capture_frames boot 120
+if ! wait_agent "${LIVE_TEST_BOOT_TIMEOUT:-900}"; then
+    echo "::error::the live system's guest agent never answered; see boot/ and serial-cd.log"
+    screenshot boot-no-agent
+    summary_line "Boot to guest agent" "FAIL"
+    finish
+    exit 1
+fi
+summary_line "Boot to guest agent" "ok after ${waited}s"
+echo "guest agent up after ${waited}s"
+
+# ---- 2. live session ---------------------------------------------------------
+
+echo "::group::live session"
+if guest session 720 | tee "$dir/live-session.log"; then
+    summary_line "Autologin into the live session" "ok"
+else
+    summary_line "Autologin into the live session" "FAIL (see live-session.log)"
+fi
+echo "::endgroup::"
+# Let Plasma, the cockpit and the demo settle.
+sleep 45
+screenshot 01-live-desktop
+
+echo "::group::live checks"
+set +e
+guest checks 900 | tee "$dir/live-checks.log"
+system_rc=${PIPESTATUS[0]}
+set -e
+echo "::endgroup::"
+summary_phase "Live session checks" "$system_rc" "$dir/live-checks.log"
+screenshot 02-live-desktop-later
+
+# The demo's waiting run, approved: the cockpit shows it move through the
+# pipeline.
+guest approve 120 | tee "$dir/live-approve.log" || true
+sleep 8
+screenshot 03-demo-running
+sleep 30
+screenshot 04-demo-later
+
+# The installer, as "Install AgentUX" starts it (best effort).
+echo "::group::installer launcher"
+# shellcheck disable=SC2016 # expanded in the VM
+guest_cmd 60 'uid=$(id -u liveuser); runuser -u liveuser -- env XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus systemd-run --user --unit=live-test-installer --collect /usr/libexec/agentux/live-install' \
+    || echo "::warning::could not start Install AgentUX"
+sleep 75
+screenshot 05-installer
+guest_cmd 60 'ps -eo pid,user,args | grep -E "[a]naconda|[l]iveinst|[p]kexec" || echo "no installer process"' | tee "$dir/installer-processes.txt" || true
+if grep -q anaconda "$dir/installer-processes.txt"; then
+    summary_line "Install AgentUX opens the installer (best effort)" "ok"
+else
+    echo "::warning::the installer did not start from Install AgentUX; see 05-installer.png"
+    summary_line "Install AgentUX opens the installer (best effort)" "warn: no anaconda process (05-installer.png)"
+fi
+guest_cmd 60 'pkill -f "anaconda|liveinst" || true; sleep 5; pkill -9 -f "anaconda|liveinst" || true; rm -rf /run/anaconda /tmp/anaconda*.log /tmp/packaging.log' >/dev/null 2>&1 || true
+echo "::endgroup::"
+
+guest_cmd 120 'journalctl --no-pager -b' >"$dir/journal-live.log" 2>&1 || true
+
+# ---- 3. install --------------------------------------------------------------
+
+if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
+    echo "::group::install from the live system"
+    set +e
+    guest install 3600 | tee "$dir/install.log"
+    install_rc=${PIPESTATUS[0]}
+    set -e
+    guest_cmd 120 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1 || true
+    echo "::endgroup::"
+    summary_phase "Install from the live system (best effort)" "$install_rc" "$dir/install.log"
+    if [[ "$install_rc" == 0 ]]; then
+        echo "::group::installed system"
+        set +e
+        guest verify 300 | tee "$dir/install-verify.log"
+        verify_rc=${PIPESTATUS[0]}
+        set -e
+        echo "::endgroup::"
+        summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
+        (( verify_rc == 0 )) || system_rc=1
+
+        # The installed disk alone: its first boot (plasma-setup's wizard).
+        stop_vm
+        start_vm
+        capture_frames installed-boot 90
+        sleep 240
+        screenshot 06-installed-first-boot
+        if wait_agent 300; then
+            guest_cmd 120 'bootc status; bootc status --format=json | jq -r ".status.booted.image.image.image"' \
+                | tee "$dir/installed-bootc-status.txt" || true
+            summary_line "Installed system booted (best effort)" "ok: $(tail -n1 "$dir/installed-bootc-status.txt")"
+        else
+            summary_line "Installed system booted (best effort)" "no guest agent; see 06-installed-first-boot.png"
+        fi
+    else
+        echo "::warning::installing from the live system failed; see install.log and anaconda.log"
+    fi
+fi
+
+finish
+exit "$system_rc"

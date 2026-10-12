@@ -1,0 +1,123 @@
+#!/usr/bin/bash
+# AgentUX live session only (agentux-live-demo.service): a demo for people
+# trying AgentUX without logging in to any vendor. In the live session
+# agentuxd runs with --fake-agents, a scripted stand-in for the coding agents
+# that answers every step at once. This sets up ~/agentux-demo, a small git
+# project whose agentux.yaml mirrors the default pipeline (plan with your
+# approval, implement, gate checks, review by another vendor, pull request),
+# and starts two runs in it:
+#
+#   - "Add a /health endpoint" stops at plan approval, waiting for you in
+#     the cockpit's inbox; approve it and watch it go through the gate;
+#   - "Fix the flaky login test" is approved here and runs to the end, so
+#     there is a finished run to look at.
+#
+# The gate's checks only sleep, so each run spends a few seconds in it.
+# Runs once per live session; `aux ps` shows them, `aux watch <run>` follows one.
+set -euo pipefail
+
+repo="$HOME/agentux-demo"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/agentux"
+marker="$state/live-demo.done"
+[[ -e "$marker" ]] && exit 0
+mkdir -p "$state"
+
+# agentuxd starts at login with this unit; wait for its socket.
+for (( i = 0; i < 60; i++ )); do
+    aux ps >/dev/null 2>&1 && break
+    sleep 1
+done
+aux ps >/dev/null
+
+if [[ ! -d "$repo/.git" ]]; then
+    mkdir -p "$repo/src" "$repo/tests"
+    cat >"$repo/agentux.yaml" <<'EOF'
+# AgentUX live demo. The live session's agentuxd runs with --fake-agents, so
+# the roles below are played by a scripted fake; on an installed system they
+# are the real CLIs (claude-code, codex, opencode, antigravity).
+version: 1
+
+roles:
+  planner:
+    harness: claude-code
+  implementer:
+    harness: opencode
+  reviewer:
+    harness: codex
+
+checks:
+  - name: lint
+    run: sleep 6
+  - name: test
+    run: sleep 12
+
+pipeline:
+  - step: plan
+    role: planner
+    approve: true
+  - step: implement
+    role: implementer
+  - step: gate
+    checks: [lint, test]
+    on_fail: implement
+    max_attempts: 3
+  - step: review
+    role: reviewer
+    on_changes_requested: implement
+    max_rounds: 2
+  - step: pull_request
+EOF
+    cat >"$repo/README.md" <<'EOF'
+# agentux-demo
+
+A tiny web service for the AgentUX live demo. Open the AgentUX cockpit
+(Meta+A) to see the runs AgentUX started here, or run `aux ps` in a terminal.
+EOF
+    cat >"$repo/src/app.py" <<'EOF'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(404)
+        self.end_headers()
+
+
+if __name__ == "__main__":
+    HTTPServer(("127.0.0.1", 8000), Handler).serve_forever()
+EOF
+    cat >"$repo/tests/test_login.py" <<'EOF'
+import random
+
+
+def test_login():
+    assert random.random() < 0.9  # flaky on purpose
+EOF
+    git -C "$repo" init --quiet --initial-branch=main
+    git -C "$repo" add .
+    git -C "$repo" -c user.name="AgentUX Live" -c user.email=live@agentux.invalid \
+        commit --quiet --message="Initial commit"
+fi
+
+# approve_plan RUN: approves the run's plan once it waits for approval.
+approve_plan() {
+    local run="$1" request=""
+    for (( i = 0; i < 60; i++ )); do
+        request="$(aux ps | awk -v r="$run" '$2 == "run" && $3 == r { print $1; exit }')"
+        [[ -n "$request" ]] && break
+        sleep 1
+    done
+    [[ -n "$request" ]] || { echo "live-demo: run $run never asked for approval" >&2; return 1; }
+    aux approve "$request" --message "Approved by the live demo"
+}
+
+done_run="$(aux run "$repo" --title "Fix the flaky login test" \
+    --prompt "tests/test_login.py fails one time in ten. Find out why and make it deterministic.")"
+echo "live-demo: started $done_run"
+approve_plan "$done_run"
+
+waiting_run="$(aux run "$repo" --title "Add a /health endpoint" \
+    --prompt "Add a GET /health endpoint to src/app.py that returns 200 and {\"status\": \"ok\"}, with a test.")"
+echo "live-demo: started $waiting_run (waits for your approval in the cockpit)"
+
+touch "$marker"

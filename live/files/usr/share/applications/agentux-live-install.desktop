@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Install AgentUX
+GenericName=Install
+Comment=Install AgentUX to this computer's disk (needs an internet connection)
+Exec=/usr/libexec/agentux/live-install
+Icon=agentux
+Terminal=false
+Categories=System;
+Keywords=install;installer;anaconda;disk;
+StartupNotify=true

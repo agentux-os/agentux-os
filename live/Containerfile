@@ -1,0 +1,22 @@
+# The AgentUX live environment: what boots from the live ISO.
+#
+# A layer on top of a published AgentUX image (BASE_IMAGE), turned into a
+# bootable ISO by Titanoboa (github.com/ublue-os/titanoboa, see live.yml),
+# which squashes this image's root filesystem into /LiveOS/squashfs.img and
+# boots its kernel and initramfs from GRUB entries in iso.yaml (the
+# "container-native ISO contract").
+#
+# Everything live-only lives here and in live/, never in the image itself:
+# the installer started from the live session installs the published, signed
+# image from the registry, not this one, so none of it reaches an installed
+# system. See live/build.sh for what this adds and why.
+#
+#   sudo podman build -f live/Containerfile -t localhost/agentux-live .
+#
+# BASE_IMAGE: the AgentUX image to make live (either variant).
+
+ARG BASE_IMAGE=ghcr.io/agentux-os/agentux:latest
+FROM ${BASE_IMAGE}
+
+RUN --mount=type=bind,source=live,target=/tmp/live \
+    /tmp/live/build.sh

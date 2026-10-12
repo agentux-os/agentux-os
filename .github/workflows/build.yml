@@ -341,7 +341,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck
-        run: shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh
+        run: |
+          shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
+          shellcheck --shell=sh live/livesys-session-extra
 
       - name: hadolint
-        run: docker run --rm -v "$PWD:/src:ro" -w /src hadolint/hadolint:v2.15.1 hadolint Containerfile
+        run: docker run --rm -v "$PWD:/src:ro" -w /src hadolint/hadolint:v2.15.1 hadolint Containerfile live/Containerfile
