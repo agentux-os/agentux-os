@@ -170,6 +170,78 @@ assert "agentux-first-login enabled for all users" \
 assert "agentux-antigravity-acp enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentux-antigravity-acp.service
 
+# Waybar's agents module (hyprland variant): /usr/libexec/agentux/waybar-agents
+# must print one valid Waybar JSON object whatever the daemon's state. With
+# no daemon it says offline; against `aux daemon --fake-agents` on a
+# temporary socket it says idle, then, once a run waits for plan approval,
+# waiting with one run and one request.
+waybar_agents() {
+    echo "== Waybar agents module (waybar-agents)"
+    local wb=/usr/libexec/agentux/waybar-agents tmp sock repo i
+    assert "$wb executable" test -x "$wb"
+    # shellcheck disable=SC2016 # jq's variables
+    assert "waybar config runs $wb as JSON" \
+        jq -e --arg wb "$wb" '."custom/agents".exec == $wb and ."custom/agents"."return-type" == "json" and (."modules-left" + ."modules-center" + ."modules-right" | index("custom/agents"))' \
+        "$home/.config/waybar/config.jsonc"
+    tmp="$(mktemp -d)"
+    chown "$user:" "$tmp"
+    chmod 0700 "$tmp"
+    sock="$tmp/run/agentuxd.sock"
+    # as_user with the socket; the output must be a JSON object of class $1.
+    # shellcheck disable=SC2329 # called through assert
+    wb_is() {
+        as_user env XDG_RUNTIME_DIR="$tmp" AGENTUX_SOCKET="$sock" "$wb" </dev/null \
+            | tee /dev/stderr | jq -e --arg c "$1" '.class == $c and (.text | type == "string") and (.tooltip | type == "string")'
+    }
+    assert "waybar-agents with no daemon: offline" wb_is offline
+
+    as_user env AGENTUX_SOCKET="$sock" aux daemon --database "$tmp/state/agentuxd.db" --fake-agents \
+        </dev/null >"$tmp/daemon.log" 2>&1 &
+    local daemon_pid=$!
+    for _ in $(seq 100); do
+        [[ -S "$sock" ]] && break
+        sleep 0.2
+    done
+    assert "fake-agents daemon socket $sock" test -S "$sock"
+    assert "waybar-agents, fake daemon, no runs: idle" wb_is idle
+
+    repo="$tmp/repo"
+    mkdir -p "$repo"
+    cat >"$repo/agentux.yaml" <<'EOF'
+version: 1
+roles:
+  implementer:
+    harness: fake
+pipeline:
+  - step: plan
+    role: implementer
+    approve: true
+  - step: implement
+    role: implementer
+EOF
+    chown -R "$user:" "$repo"
+    as_user git -C "$repo" init --quiet --initial-branch=main
+    as_user git -C "$repo" add .
+    as_user git -C "$repo" -c user.name="AgentUX Smoke" -c user.email=smoke@agentux.invalid \
+        -c commit.gpgsign=false commit --quiet --message=init
+    assert "aux run (fake agents)" \
+        as_user env AGENTUX_SOCKET="$sock" aux run "$repo" --prompt "Waybar & <smoke> test"
+    for i in $(seq 60); do
+        as_user env AGENTUX_SOCKET="$sock" aux ps </dev/null | grep -qx 'WAITING FOR YOU' && break
+        sleep 1
+    done
+    echo "      after ${i}s:"
+    as_user env AGENTUX_SOCKET="$sock" aux ps </dev/null | sed 's/^/      /' || true
+    assert "waybar-agents with a plan to approve: waiting" wb_is waiting
+    assert "waybar-agents counts 1 run, 1 waiting" \
+        bash -c "runuser -u '$user' -- env -i HOME='$home' PATH=/usr/bin XDG_RUNTIME_DIR='$tmp' AGENTUX_SOCKET='$sock' '$wb' | jq -e '.text == \"agents 1 · 1 waiting\" and (.tooltip | contains(\"&amp; &lt;smoke&gt;\"))'"
+
+    kill "$daemon_pid" 2>/dev/null || true
+    wait "$daemon_pid" 2>/dev/null || true
+    if (( fail )); then echo "      fake-agents daemon log:"; sed 's/^/      /' "$tmp/daemon.log"; fi
+    rm -rf "$tmp"
+}
+
 # The hyprland variant: Hyprland as a second session, preselected on the
 # login screen, and the AgentUX defaults seeded into a fresh user's ~/.config
 # the way the session does it, which must parse. The plasma image has none of
@@ -206,6 +278,7 @@ if [[ "$variant" == hyprland ]]; then
     assert "foot --check-config on the seeded foot.ini" \
         as_user foot --check-config --config "$home/.config/foot/foot.ini"
     rm -rf "$hypr_runtime"
+    waybar_agents
 else
     assert "no Hyprland session in the plasma image" test ! -e "$hypr_session"
 fi

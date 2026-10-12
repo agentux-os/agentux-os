@@ -3,12 +3,20 @@
     "position": "top",
     "height": 30,
     "spacing": 6,
-    "modules-left": ["custom/agentux", "hyprland/workspaces", "hyprland/window"],
+    "modules-left": ["custom/agentux", "custom/agents", "hyprland/workspaces", "hyprland/window"],
     "modules-center": ["clock"],
     "modules-right": ["cpu", "memory", "network", "pulseaudio", "battery", "tray"],
     "custom/agentux": {
         "format": "AgentUX",
         "tooltip-format": "Open the AgentUX cockpit (Super+A)",
+        "on-click": "/usr/libexec/agentux/hyprland-cockpit"
+    },
+    "custom/agents": {
+        "exec": "/usr/libexec/agentux/waybar-agents",
+        "return-type": "json",
+        "interval": 5,
+        "signal": 8,
+        "tooltip": true,
         "on-click": "/usr/libexec/agentux/hyprland-cockpit"
     },
     "hyprland/workspaces": {
