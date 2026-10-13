@@ -304,7 +304,10 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     sleep 3
     sudo partprobe /dev/nbd0 2>/dev/null
     lsblk -f /dev/nbd0
-    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 bash "$here/live.sh" | tee "$dir/install-verify.log"
+    # The image the live installer installs: the ISO's variant.
+    install_image=ghcr.io/agentux-os/agentux:latest
+    [[ "$(basename "$iso")" == *hyprland* ]] && install_image=ghcr.io/agentux-os/agentux-hyprland:latest
+    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_INSTALL_IMAGE="$install_image" bash "$here/live.sh" | tee "$dir/install-verify.log"
     verify_rc=${PIPESTATUS[0]}
     sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
     set -e
