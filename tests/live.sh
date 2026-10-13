@@ -208,16 +208,42 @@ user --name=installtest --password=installtest --plaintext --groups=wheel
 %include /usr/share/agentux/live/install.ks
 EOF
     echo "      kickstart:"; indent </var/tmp/install-test.ks
-    local start=$SECONDS rc=0
+    # The install takes a while and fills RAM (the live root and /var/tmp
+    # are tmpfs), so it runs as a unit of its own and install-result reports
+    # on it; the guest agent is kept out of the OOM killer's way.
+    local pid
+    for pid in $(pidof qemu-ga); do echo -1000 >"/proc/$pid/oom_score_adj"; done
+    rm -f /var/tmp/install-test.rc /var/tmp/install-test.start
+    date +%s >/var/tmp/install-test.start
     # Anaconda wants a session bus of its own.
-    dbus-run-session -- anaconda --cmdline --kickstart /var/tmp/install-test.ks \
-        >/var/tmp/anaconda-test.out 2>&1 || rc=$?
+    systemd-run --unit=agentux-install-test --collect --property=OOMScoreAdjust=500 \
+        bash -c 'dbus-run-session -- anaconda --cmdline --kickstart /var/tmp/install-test.ks >/var/tmp/anaconda-test.out 2>&1; echo $? >/var/tmp/install-test.rc'
+    ok "install started (agentux-install-test.service)"
+}
+
+# Prints a line while the install runs; exits 0 once it has finished.
+phase_install_done() {
+    if [[ -e /var/tmp/install-test.rc ]]; then return 0; fi
+    echo "installing: $(free -m | awk '/^Mem:/ {print $3 "/" $2 " MiB"}'), /var/tmp $(df -m --output=used /var/tmp | tail -n1 | tr -d ' ') MiB, $(tail -n1 /var/tmp/anaconda-test.out 2>/dev/null | cut -c1-120)"
+    systemctl is-active -q agentux-install-test.service || { echo "install unit gone without a result"; return 0; }
+    return 1
+}
+
+phase_install_result() {
+    local rc start
+    rc="$(cat /var/tmp/install-test.rc 2>/dev/null || echo "none")"
+    start="$(cat /var/tmp/install-test.start 2>/dev/null || date +%s)"
+    echo "metric  install time: $(( $(date +%s) - start ))s"
+    echo "metric  RAM after the install: $(free -m | awk '/^Mem:/ {print $3 " MiB of " $2 " MiB"}')"
+    if journalctl -k --no-pager | grep -qi 'out of memory'; then
+        echo "      the kernel killed processes for lack of memory:"
+        journalctl -k --no-pager | grep -i 'out of memory\|killed process' | tail -n 10 | indent
+    fi
     # Anaconda can exit 0 without installing; the disk tells.
     if [[ "$rc" == 0 ]] && ! lsblk -lnpo FSTYPE "$target" | grep -qE 'btrfs|xfs|ext4'; then
         echo "      no file system on $target after the install"
         rc=1
     fi
-    echo "metric  install time: $(( SECONDS - start ))s"
     tail -n 40 /var/tmp/anaconda-test.out | indent
     if [[ "$rc" == 0 ]] && ! grep -qi 'traceback\|installation failed' /var/tmp/anaconda-test.out; then
         ok "anaconda installed to $target"
@@ -281,6 +307,8 @@ case "$phase" in
     checks) phase_checks ;;
     approve) phase_approve ;;
     install) phase_install ;;
+    install-done) phase_install_done; exit $? ;;
+    install-result) phase_install_result ;;
     verify) phase_verify ;;
     *) echo "unknown phase $phase" >&2; exit 2 ;;
 esac

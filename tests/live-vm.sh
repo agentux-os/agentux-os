@@ -23,7 +23,8 @@
 #
 # Logs, screenshots and summary.md go to DIR. Needs qemu-system-x86_64 (or
 # -aarch64) with KVM, UEFI firmware (ovmf / qemu-efi-aarch64), qemu-img and
-# python3. LIVE_TEST_MEMORY (MiB, default 8192) and LIVE_TEST_CPUS (4) size
+# python3. LIVE_TEST_MEMORY (MiB, default 12288: the install from the live system
+# runs in RAM) and LIVE_TEST_CPUS (4) size
 # the VM.
 set -euo pipefail
 
@@ -68,7 +69,7 @@ start_vm() {
     "$qemu" \
         -name agentux-live-test \
         -machine "$vm_machine" -cpu host \
-        -smp "${LIVE_TEST_CPUS:-4}" -m "${LIVE_TEST_MEMORY:-8192}" \
+        -smp "${LIVE_TEST_CPUS:-4}" -m "${LIVE_TEST_MEMORY:-12288}" \
         -drive if=pflash,format=raw,readonly=on,file="$code" \
         -drive if=pflash,format=raw,file="$dir/OVMF_VARS.fd" \
         -device virtio-scsi-pci,id=scsi \
@@ -270,8 +271,20 @@ guest_cmd 120 'journalctl --no-pager -b' >"$dir/journal-live.log" 2>&1 || true
 if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     echo "::group::install from the live system"
     set +e
-    guest install 3600 | tee "$dir/install.log"
+    guest install 300 | tee "$dir/install.log"
     install_rc=${PIPESTATUS[0]}
+    if [[ "$install_rc" == 0 ]]; then
+        # Poll: each check is a short guest agent call, so a busy or
+        # restarted agent costs one poll, not the whole install.
+        deadline=$(( SECONDS + 3600 ))
+        until guest install-done 60 2>&1 | tail -n1; [[ "${PIPESTATUS[0]}" == 0 ]]; do
+            if (( SECONDS > deadline )); then echo "install still running after an hour"; break; fi
+            sleep 30
+        done
+        screenshot 05b-after-install
+        guest install-result 300 | tee -a "$dir/install.log"
+        install_rc=${PIPESTATUS[0]}
+    fi
     set -e
     guest_cmd 120 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1 || true
     guest_cmd 120 'cat /tmp/storage.log /tmp/dbus.log 2>/dev/null' >"$dir/anaconda-storage.log" 2>&1 || true
