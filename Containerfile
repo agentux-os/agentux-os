@@ -38,7 +38,7 @@ RUN dnf -y install \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the Plasma overlay checksum.
-ARG AGENTUX_CORE_VERSION=0.4.1
+ARG AGENTUX_CORE_VERSION=0.4.2
 ARG AGENTUX_DESKTOP_VERSION=0.4.1
 ARG AGENTUX_PLASMA_SHA256=5a2d2544cbfa22d689e58a7d27a0a88a68d65be75c00d2d0b18d320ea4618516
 
