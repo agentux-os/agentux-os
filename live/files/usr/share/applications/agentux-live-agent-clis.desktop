@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Install the agent CLIs
+Comment=Download Claude Code, Codex, OpenCode and Antigravity CLI into this live session (kept in RAM)
+Exec=/usr/libexec/agentux/live-agent-clis
+Icon=download
+Terminal=false
+Categories=System;
+StartupNotify=false

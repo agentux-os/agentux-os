@@ -1,0 +1,27 @@
+#!/usr/bin/bash
+# AgentUX live session only: "Install AgentUX". Starts Anaconda (liveinst),
+# which installs the published, signed image named in
+# /usr/share/agentux/live/install-image from the registry (see
+# /usr/share/agentux/live/install.ks), not the live system itself. It needs a
+# network connection, so check for one first instead of failing in the
+# middle of the installer.
+set -uo pipefail
+
+image="$(cat /usr/share/agentux/live/install-image 2>/dev/null || echo "the AgentUX image")"
+
+message() {
+    if command -v kdialog >/dev/null; then
+        kdialog --title "Install AgentUX" --"$1" "$2"
+    else
+        notify-send --app-name="Install AgentUX" --icon=agentux "Install AgentUX" "$2"
+    fi
+}
+
+if ! nm-online -q -t 15; then
+    message error "Installing AgentUX downloads $image (a few GB), so it needs an internet connection. Connect to a network (the network icon in the panel) and try again.
+
+To install without a network, use the AgentUX installer ISO instead."
+    exit 1
+fi
+
+exec liveinst "$@"

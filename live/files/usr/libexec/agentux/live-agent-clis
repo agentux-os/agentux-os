@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+# AgentUX live session only: "Install the agent CLIs". On an installed system
+# agentux-first-login.service installs Claude Code, Codex, OpenCode,
+# Antigravity CLI, their ACP adapters and the dev tools at the first login.
+# The live session does not start it at login: the downloads would land in
+# RAM (the live root is a tmpfs overlay). This starts it on request; it still
+# skips Antigravity's ~1 GB ACP server, which never runs live.
+set -uo pipefail
+
+notify() {
+    notify-send --app-name="AgentUX" --icon=agentux "$@" || true
+}
+
+if systemctl --user is-active -q agentux-first-login.service; then
+    notify "Agent CLIs" "Already installing; see: journalctl --user -u agentux-first-login"
+    exit 0
+fi
+notify "Installing the agent CLIs" "Claude Code, Codex, OpenCode and Antigravity CLI (several hundred MB, kept in RAM). This takes a few minutes."
+if systemctl --user start agentux-first-login.service; then
+    notify "Agent CLIs installed" "Log in to a vendor in a terminal (e.g. claude, codex) to use it. The demo keeps using fake agents."
+else
+    notify --urgency=critical "Installing the agent CLIs failed" "See: journalctl --user -u agentux-first-login"
+    exit 1
+fi

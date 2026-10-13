@@ -1,0 +1,17 @@
+# AgentUX live session only (live/build.sh): sets up the demo project and
+# starts its runs in agentuxd (which runs with --fake-agents live), so the
+# cockpit has runs to show. See /usr/libexec/agentux/live-demo.
+[Unit]
+Description=AgentUX live demo runs
+ConditionUser=!@system
+ConditionKernelCommandLine=rd.live.image
+Wants=agentuxd.service
+After=agentuxd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/agentux/live-demo
+TimeoutStartSec=5min
+
+[Install]
+WantedBy=default.target

@@ -5,6 +5,7 @@
 image := env("AGENTUX_IMAGE", "localhost/agentux:dev")
 bib := "quay.io/centos-bootc/bootc-image-builder:latest"
 hadolint := "docker.io/hadolint/hadolint:v2.15.1"
+titanoboa := "ghcr.io/ublue-os/titanoboa:latest"
 
 default:
     @just --list
@@ -15,6 +16,32 @@ build variant="plasma":
 
 # Build an Anaconda installer ISO from the local image (output/bootiso/install.iso)
 iso: (_bib "anaconda-iso" "disk_config/iso.toml")
+
+# Build the live ISO (output/live/*.iso) with Titanoboa from an image: the published one, or e.g. image=localhost/agentux:dev
+live image="ghcr.io/agentux-os/agentux:latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The live layer is built rootful: Titanoboa reads root's container storage.
+    if [[ "{{ image }}" == localhost/* && "$(id -u)" -ne 0 ]]; then
+        podman save {{ image }} | sudo podman load
+    fi
+    sudo podman build --build-arg BASE_IMAGE={{ image }} -f live/Containerfile --tag localhost/agentux-live:dev .
+    mkdir -p output/live
+    sudo podman run --rm --security-opt label=disable \
+        -v "$PWD/output/live:/output" \
+        -v /var/lib/containers/storage:/usr/lib/containers/storage:ro \
+        --mount type=image,source=localhost/agentux-live:dev,dst=/rootfs \
+        {{ titanoboa }}
+    sudo chown "$(id -u):$(id -g)" output/live/*.iso
+    ls -lh output/live/*.iso
+
+# Boot the live ISO headless in QEMU/KVM and test it like CI does (results in output/live-test; LIVE_TEST_INSTALL=0 skips the install)
+live-test iso="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    iso="{{ iso }}"
+    [[ -n "$iso" ]] || iso="$(ls -t output/live/*.iso | head -n1)"
+    tests/live-vm.sh "$iso" output/live-test
 
 # Build a qcow2 disk from the local image; config adds a user, e.g. [[customizations.user]]
 qcow2 config="": (_bib "qcow2" config)
@@ -57,8 +84,9 @@ _boot-config:
 
 # Run shellcheck on the scripts and hadolint on the Containerfile
 lint:
-    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh
-    podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile
+    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
+    shellcheck --shell=sh live/livesys-session-extra
+    podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile live/Containerfile
 
 # Move the AgentUX pins in the Containerfile to the latest releases (pre-releases included, x86_64 and aarch64 RPMs required); needs gh
 bump-agentux:

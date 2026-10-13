@@ -101,6 +101,27 @@ How it is built:
 
 To see it without installing: `python3 plymouth/preview.py` renders the animation from the theme's images (the GIF above), and [`plymouth/preview-vm.sh`](plymouth/preview-vm.sh) builds the `Containerfile`'s splash step on the base image and boots that kernel and initramfs in QEMU (software emulation in a container, no KVM, a few minutes) twice, once plain and once with a LUKS disk and a few keys typed into the prompt, saving a screenshot every half second to `output/plymouth-preview/`. The screenshots above come from it.
 
+## Try it live
+
+The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download `agentux-live-<date>-x86_64.iso` from the artifacts of a successful run (weekly, on tags, or run the workflow; `hyprland` builds `agentux-hyprland-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test), check it against its `.sha256` and write it to a USB stick as above. It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
+
+What you get:
+
+- **The real desktop.** The live system is the published image plus a thin live layer: GRUB's "Try or install AgentUX" entry logs a passwordless `liveuser` straight into Plasma (or the AgentUX Hyprland session on the hyprland ISO) with the AgentUX theme, wallpaper, panel and cockpit, as on an installed system.
+- **A demo with fake agents.** Agent CLIs need vendor logins, so the live session's `agentuxd` runs with `--fake-agents`, a scripted stand-in that answers every agent step. At login it sets up `~/agentux-demo`, a small project whose `agentux.yaml` mirrors the default pipeline (Claude Code plans, OpenCode implements, Codex reviews), and starts two runs: one already approved, which runs through the gate and review to its pull request, and "Add a /health endpoint", which waits in the cockpit's inbox for you to approve its plan. A note on the desktop explains it; `aux ps` and `aux watch <run>` work in a terminal too.
+- **No downloads at login.** On an installed system first login downloads the agent CLIs and Antigravity's ACP server (together over 1 GB); live, they would sit in RAM. The live session does not start `agentux-first-login.service` at login: **Install the agent CLIs** on the desktop starts it on demand. `agentux-antigravity-acp.service` never runs live (a drop-in adds `ConditionKernelCommandLine=!rd.live.image`).
+- **Install AgentUX** (desktop, panel and menu) opens Anaconda's web installer. You pick the language, keyboard and disk; the account is created by the first-boot wizard (plasma-setup) when the installed system starts, as on Fedora Kinoite. It installs `ghcr.io/agentux-os/agentux:latest` (`agentux-hyprland` from the hyprland ISO) **from the registry**, so it needs an internet connection (the launcher checks first and says so; use the installer ISO to install offline). The pull goes through the image's own signature policy, so only an image signed with the AgentUX key installs, and the installed system tracks `:latest` exactly as one installed from the installer ISO (`bootc switch --mutate-in-place --transport registry`, as bootc-image-builder's installer does). Nothing from the live session is installed: it is not the live root that gets copied.
+
+How it is built: [`live/Containerfile`](live/Containerfile) starts from the published image and runs [`live/build.sh`](live/build.sh), which adds everything live-only; [Titanoboa](https://github.com/ublue-os/titanoboa) (Universal Blue's live ISO builder, used for Bazzite's and Bluefin's live ISOs) squashes that image into `LiveOS/squashfs.img` and writes the ISO with its kernel, initramfs and the GRUB entries from `/usr/lib/bootc-image-builder/iso.yaml`. The live layer:
+
+- regenerates the initramfs with dracut's `dmsquash-live` (the AgentUX boot splash stays in it), boots with `rd.live.image` and SELinux permissive (the squashfs carries no labels), and mounts a larger tmpfs on `/var/tmp`;
+- adds `livesys-scripts` (the live user, autologin, Fedora's live tweaks), `anaconda-live` with an AgentUX profile and the payload in `/usr/share/agentux/live/install.ks`, and `qemu-guest-agent`;
+- replaces Fedora's "Install to Hard Drive" with **Install AgentUX** and **Install the agent CLIs**, pins Install AgentUX first in the panel and adds the desktop note;
+- runs `agentuxd` with `--fake-agents` (a drop-in on its user unit) and enables `agentux-live-demo.service`;
+- disables `agentux-first-login.service` and `agentux-antigravity-acp.service` for all users.
+
+Live mode is visible to scripts as `rd.live.image` on the kernel command line, and `/usr/share/agentux/live/marker` exists only in the live layer. None of it is in the image: an installed system has none of these files.
+
 ## Install
 
 ### From the ISO
@@ -186,6 +207,8 @@ just build        # podman build -> localhost/agentux:dev (just build hyprland f
 just iso          # installer ISO from that image -> output/bootiso/install.iso (uses sudo)
 just vm           # install the ISO into a VM disk, output/vm-disk.qcow2
 just vm disk      # boot the installed VM disk
+just live         # live ISO from the published image -> output/live/*.iso (just live localhost/agentux:dev for your build; uses sudo)
+just live-test    # boot that ISO headless and run the live test, like CI (output/live-test/)
 just smoke        # real first login in a container of the image, then check every tool resolves
 just lint         # shellcheck + hadolint, the same checks as CI
 just bump-agentux # move the AgentUX pins to the latest releases (see above)
@@ -209,6 +232,16 @@ The smoke test never boots anything. The [Boot test](https://github.com/agentux-
 Then it ends the wizard session with a display manager drop-in without autologin and screenshots the login screen, adds an autologin drop-in (on that VM only), reboots into Plasma (Wayland), checks that `kwin_wayland`, `plasmashell` and `agentux-cockpit` run with the AgentUX look-and-feel, that the cockpit's autostart unit is active, that the Welcome Center neither runs nor was launched and its kded module is not loaded, and takes screenshots through QEMU's monitor: the first boot, the login screen and the desktop. Those desktop checks are reported but do not fail the run. QEMU also takes a screenshot every half second for the first 45 seconds of the first boot and of the reboot (`splash/boot/`, `splash/reboot/` in the artifact), and the summary says whether any of them shows the boot splash; that only warns, since what a VM's screen shows that early depends on the firmware and the driver handover. The test VM's kernel command line has `plymouth.ignore-serial-consoles`, since with a serial console Plymouth would draw only text there. Screenshots, the serial console, `journalctl` for both boots and `bootc status` are uploaded as the run's artifact, with a summary on the run page.
 
 Locally, `just boot-test` does the same with the image from `just build` (results in `output/boot-test/`).
+
+### Live ISO test
+
+The Live ISO workflow boots the amd64 ISO it built (on pull requests that touch `live/`, the live test or the workflow, weekly and on tags) headless in QEMU/KVM with UEFI, from the CD, with an empty disk behind it, and talks to the live system through the QEMU guest agent the live layer ships ([`tests/live-vm.sh`](tests/live-vm.sh), which runs [`tests/live.sh`](tests/live.sh) in the VM as root):
+
+- it waits for the live user's autologin session, then checks that the system booted live (`rd.live.image`, the overlay root), that `kwin_wayland`, `plasmashell` and `agentux-cockpit` run for `liveuser` with the AgentUX look-and-feel, that `agentuxd` runs with `--fake-agents` and `aux ps` answers with the demo's runs (one waiting for approval), and that neither first-login nor the Antigravity ACP server unit is enabled or ran; the installer launchers, the panel pin and Anaconda's payload are checked too but only warn;
+- screenshots: the desktop after login and a minute later, the demo after the test approves its waiting run, and the installer opened through **Install AgentUX**; plus a screendump every 2 seconds of the first two minutes (GRUB and the boot splash, `boot/` in the artifact);
+- then it installs from the live system to the VM's disk: Anaconda with the live installer's own payload (`install.ks`), unattended (a kickstart answers the disk, language and account), checks the installed deployment (it tracks `ghcr.io/agentux-os/agentux:latest` from the registry, has the signature policy and the image's own user units, and no live user, live demo or fake-agents override), boots the disk alone and screenshots its first boot. The install depends on the VM reaching ghcr.io, so a failed install only warns; an installed system that differs from a normal install fails the job.
+
+`just live-test` does the same locally (`LIVE_TEST_INSTALL=0` skips the install).
 
 `just qcow2 path/to/config.toml` builds a ready-to-boot disk instead (`just vm qcow2` boots it); the config should add a user with `[[customizations.user]]`. Set `AGENTUX_IMAGE` to build from another image, e.g. `AGENTUX_IMAGE=ghcr.io/agentux-os/agentux:latest just iso` after a `podman pull`.
 

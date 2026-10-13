@@ -1,0 +1,28 @@
+# AgentUX live session (live/build.sh installs this as
+# /var/lib/livesys/livesys-session-extra). livesys-main sources it as root at
+# the first boot of the live system, after its own Plasma setup (autologin,
+# the Fedora installer launcher on the desktop) and before it hands
+# /home/liveuser to the live user.
+
+# The AgentUX launchers replace Fedora's "Install to Hard Drive".
+rm -f /home/liveuser/Desktop/liveinst.desktop \
+    /home/liveuser/.local/share/applications/liveinst.desktop
+mkdir -p /home/liveuser/Desktop
+for _agentux_app in agentux-live-install agentux-live-agent-clis; do
+    install -m 0755 "/usr/share/applications/$_agentux_app.desktop" /home/liveuser/Desktop/
+done
+unset _agentux_app
+if [ -f /home/liveuser/.config/kickoffrc ]; then
+    sed -i 's|/usr/share/applications/liveinst.desktop|/usr/share/applications/agentux-live-install.desktop|' \
+        /home/liveuser/.config/kickoffrc
+fi
+
+# The desktop note's text (the note widget itself comes from the layout
+# script, with noteId agentux-live).
+install -D -m 0644 /usr/share/agentux/live/note.html \
+    /home/liveuser/.local/share/plasma_notes/agentux-live
+
+# The hyprland image logs in to its own session, as its login screen would.
+if [ -f /usr/share/wayland-sessions/agentux-hyprland.desktop ]; then
+    sed -i 's/^Session=.*/Session=agentux-hyprland.desktop/' /etc/plasmalogin.conf
+fi
