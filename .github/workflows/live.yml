@@ -158,6 +158,11 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          # The rule applies asynchronously now and then; don't race it.
+          for _ in $(seq 10); do test -w /dev/kvm && break; sleep 1; done
+          test -w /dev/kvm || sudo chmod 0666 /dev/kvm
+          ls -l /dev/kvm
           test -w /dev/kvm
           echo "ok=true" >> "$GITHUB_OUTPUT"
 
