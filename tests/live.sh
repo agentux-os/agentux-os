@@ -187,14 +187,17 @@ target=/dev/vda
 
 phase_install() {
     test -b "$target" || { bad "no $target to install to"; return; }
-    # Anaconda ignores --kickstart in live mode and reads only its
-    # interactive defaults (which %include the live payload), so the answers
-    # go in front of those, in this VM's live overlay only.
-    local defaults=/usr/share/anaconda/interactive-defaults.ks
+    # In live mode (liveinst, --liveinst) Anaconda takes no kickstart: its
+    # interactive defaults are only defaults, and the disk must be picked in
+    # the UI. So the test runs Anaconda as a plain kickstart install from the
+    # live system instead, with the answers below and the live installer's
+    # own payload (install.ks: the registry pull and the bootc switch).
     cat >/var/tmp/install-test.ks <<EOF
-# Live ISO test install. Answers what the interactive installer asks; the
-# payload is the live installer's own (the interactive defaults below).
+# Live ISO test install: the answers the installer UI would get, and the
+# payload the live installer uses.
+cmdline
 lang en_US.UTF-8
+keyboard us
 timezone UTC --utc
 ignoredisk --only-use=${target#/dev/}
 zerombr
@@ -202,27 +205,16 @@ clearpart --all --initlabel --drives=${target#/dev/}
 autopart --noswap
 rootpw --lock
 user --name=installtest --password=installtest --plaintext --groups=wheel
+%include /usr/share/agentux/live/install.ks
 EOF
-    cat "$defaults" >>/var/tmp/install-test.ks
-    cp /var/tmp/install-test.ks "$defaults"
     echo "      kickstart:"; indent </var/tmp/install-test.ks
-    local start=$SECONDS rc
-    # What liveinst does after its pkexec, minus the web UI (which it always
-    # starts when anaconda-webui is installed): as root, with PKEXEC_UID
-    # naming the live user and that user's session environment, which
-    # Anaconda uses in live mode; then Anaconda in non-interactive text mode.
-    rc=0
-    (
-        uid="$(id -u "$user")"
-        while IFS= read -r variable; do
-            export "${variable?}"
-        done < <(runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user show-environment)
-        export PKEXEC_UID="$uid" HOME="/var/home/$user" XDG_CONFIG_HOME="/var/home/$user/.config" PATH="/usr/sbin:/usr/bin"
-        exec anaconda --liveinst --cmdline
-    ) >/var/tmp/anaconda-test.out 2>&1 || rc=$?
+    local start=$SECONDS rc=0
+    # Anaconda wants a session bus of its own.
+    dbus-run-session -- anaconda --cmdline --kickstart /var/tmp/install-test.ks \
+        >/var/tmp/anaconda-test.out 2>&1 || rc=$?
     # Anaconda can exit 0 without installing; the disk tells.
     if [[ "$rc" == 0 ]] && ! lsblk -lnpo FSTYPE "$target" | grep -qE 'btrfs|xfs|ext4'; then
-        echo "      no filesystem on $target after the install"
+        echo "      no file system on $target after the install"
         rc=1
     fi
     echo "metric  install time: $(( SECONDS - start ))s"
