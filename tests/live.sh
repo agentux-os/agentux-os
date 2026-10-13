@@ -194,9 +194,7 @@ phase_install() {
     cat >/var/tmp/install-test.ks <<EOF
 # Live ISO test install. Answers what the interactive installer asks; the
 # payload is the live installer's own (the interactive defaults below).
-text
 lang en_US.UTF-8
-keyboard us
 timezone UTC --utc
 ignoredisk --only-use=${target#/dev/}
 zerombr
@@ -210,7 +208,9 @@ EOF
     echo "      kickstart:"; indent </var/tmp/install-test.ks
     local start=$SECONDS rc
     # As liveinst would run it, minus the GUI; Anaconda wants a session bus.
-    dbus-run-session -- anaconda --liveinst --cmdline >/var/tmp/anaconda-test.out 2>&1
+    # PKEXEC_UID: liveinst runs Anaconda through pkexec, which tells it the
+    # live user (whose session it asks about the keyboard).
+    PKEXEC_UID="$(id -u "$user")" dbus-run-session -- anaconda --liveinst --cmdline >/var/tmp/anaconda-test.out 2>&1
     rc=$?
     echo "metric  install time: $(( SECONDS - start ))s"
     tail -n 40 /var/tmp/anaconda-test.out | indent
