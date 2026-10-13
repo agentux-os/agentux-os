@@ -274,47 +274,55 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     guest install 300 | tee "$dir/install.log"
     install_rc=${PIPESTATUS[0]}
     if [[ "$install_rc" == 0 ]]; then
-        # Poll: each check is a short guest agent call, so a busy or
-        # restarted agent costs one poll, not the whole install.
-        deadline=$(( SECONDS + 3600 ))
-        until guest install-done 60 2>&1 | tail -n1; [[ "${PIPESTATUS[0]}" == 0 ]]; do
-            if (( SECONDS > deadline )); then echo "install still running after an hour"; break; fi
+        # Poll: each check is a short guest agent call. At the end of a
+        # kickstart install Anaconda halts the system (the kickstart default),
+        # so the agent going away for good also ends the wait.
+        deadline=$(( SECONDS + 3600 )) gone=0
+        while (( SECONDS < deadline && gone < 6 )); do
+            out="$(guest install-done 60 2>&1)"; rc=$?
+            echo "${out##*$'\n'}"
+            [[ "$rc" == 0 ]] && break
+            if [[ "$out" == *Traceback* || "$out" == *qga:* ]]; then gone=$(( gone + 1 )); else gone=0; fi
             sleep 30
         done
         screenshot 05b-after-install
-        guest install-result 300 | tee -a "$dir/install.log"
-        install_rc=${PIPESTATUS[0]}
+        guest install-result 120 | tee -a "$dir/install.log" \
+            || echo "      the guest agent is gone: Anaconda halted the live system at the end, as kickstart installs do" | tee -a "$dir/install.log"
+        guest_cmd 60 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1
+        guest_cmd 60 'cat /tmp/storage.log /tmp/dbus.log 2>/dev/null' >"$dir/anaconda-storage.log" 2>&1
     fi
     set -e
-    guest_cmd 120 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1 || true
-    guest_cmd 120 'cat /tmp/storage.log /tmp/dbus.log 2>/dev/null' >"$dir/anaconda-storage.log" 2>&1 || true
     echo "::endgroup::"
-    summary_phase "Install from the live system (best effort)" "$install_rc" "$dir/install.log"
-    if [[ "$install_rc" == 0 ]]; then
-        echo "::group::installed system"
-        set +e
-        guest verify 300 | tee "$dir/install-verify.log"
-        verify_rc=${PIPESTATUS[0]}
-        set -e
-        echo "::endgroup::"
+    stop_vm
+
+    # The installed disk, from the host: whether the live system was still
+    # there to report on it or not, the disk says what got installed.
+    echo "::group::installed system"
+    set +e
+    sudo modprobe nbd max_part=16
+    sudo qemu-nbd --connect=/dev/nbd0 "$dir/disk.qcow2"
+    sleep 3
+    sudo partprobe /dev/nbd0 2>/dev/null
+    lsblk -f /dev/nbd0
+    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 bash "$here/live.sh" | tee "$dir/install-verify.log"
+    verify_rc=${PIPESTATUS[0]}
+    sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
+    set -e
+    echo "::endgroup::"
+    if grep -q '^FAIL no ostree deployment' "$dir/install-verify.log"; then
+        echo "::warning::installing from the live system failed; see install.log and anaconda.log"
+        summary_phase "Install from the live system (best effort)" 1 "$dir/install.log"
+    else
+        summary_phase "Install from the live system" 0 "$dir/install.log"
         summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
         (( verify_rc == 0 )) || system_rc=1
 
         # The installed disk alone: its first boot (plasma-setup's wizard).
-        stop_vm
         start_vm
         capture_frames installed-boot 90
         sleep 240
         screenshot 06-installed-first-boot
-        if wait_agent 300; then
-            guest_cmd 120 'bootc status; bootc status --format=json | jq -r ".status.booted.image.image.image"' \
-                | tee "$dir/installed-bootc-status.txt" || true
-            summary_line "Installed system booted (best effort)" "ok: $(tail -n1 "$dir/installed-bootc-status.txt")"
-        else
-            summary_line "Installed system booted (best effort)" "no guest agent; see 06-installed-first-boot.png"
-        fi
-    else
-        echo "::warning::installing from the live system failed; see install.log and anaconda.log"
+        summary_line "Installed system first boot" "see 06-installed-first-boot.png"
     fi
 fi
 

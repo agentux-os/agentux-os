@@ -183,7 +183,8 @@ phase_approve() {
 }
 
 # The disk the install goes to: the VM's only disk.
-target=/dev/vda
+# LIVE_TARGET: the installed disk as the host sees it, for verify run there.
+target="${LIVE_TARGET:-/dev/vda}"
 
 phase_install() {
     test -b "$target" || { bad "no $target to install to"; return; }
@@ -261,7 +262,7 @@ phase_verify() {
     umount -R "$mnt" 2>/dev/null
     # The partition holding the ostree repository (Btrfs, Kinoite's layout).
     for part in $(lsblk -lnpo NAME,FSTYPE "$target" | awk '$2 == "btrfs" || $2 == "xfs" || $2 == "ext4" {print $1}'); do
-        if mount -o ro "$part" "$mnt" 2>/dev/null; then
+        if mount -o ro "$part" "$mnt" 2>/dev/null || mount -o ro,rescue=nologreplay "$part" "$mnt" 2>/dev/null; then
             [[ -n "$(find "$mnt" -maxdepth 4 -path '*/ostree/deploy' -print -quit 2>/dev/null)" ]] && break
             umount "$mnt"
         fi
