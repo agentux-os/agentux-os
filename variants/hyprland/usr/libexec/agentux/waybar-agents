@@ -6,88 +6,62 @@
 #   idle     no active runs
 #   running  active runs, nothing waiting for you
 #   waiting  approvals or questions waiting for you (the style shows it in Lime)
-# Reads `aux ps`, the daemon's own summary. aux has no machine-readable output
-# yet, so this parses its text, anchoring on the parts aux formats itself
-# (status, step and the "gate N/M rev N/M" column; the "WAITING FOR YOU"
-# section) rather than on column widths, since project names and titles can
-# hold spaces. The socket is aux's default ($AGENTUX_SOCKET, else
-# $XDG_RUNTIME_DIR/agentux/agentuxd.sock). Always prints exactly one JSON
-# object and exits 0, so Waybar never shows a stale or broken module.
+# Reads `aux ps --json`, the daemon's own summary in a stable form
+# (agentux-core docs/api.md, "aux ps --json"): exit 3 with {"daemon":"down"}
+# when the daemon is not reachable. The socket is aux's default
+# ($AGENTUX_SOCKET, else $XDG_RUNTIME_DIR/agentux/agentuxd.sock). Always
+# prints exactly one JSON object and exits 0, so Waybar never shows a stale or
+# broken module.
 set -uo pipefail
 
-# Pango markup is on in Waybar's text and tooltip.
-# (sed, not ${s//</&lt;}: since bash 5.2 an & in the replacement means the match.)
-escape() {
-    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
-}
+nl=$'\n'
+click="Click to open the AgentUX cockpit (Super+A)"
 
 emit() {
     jq -cn --arg text "$1" --arg tooltip "$2" --arg class "$3" \
         '{text: $text, tooltip: $tooltip, class: $class, alt: $class}'
 }
 
-nl=$'\n'
-click="Click to open the AgentUX cockpit (Super+A)"
-
 if ! command -v aux >/dev/null 2>&1; then
     emit "agents off" "aux is not installed.${nl}$click" offline
     exit 0
 fi
 
-if ! out="$(timeout 4 aux ps 2>&1)"; then
-    reason="$(escape "$(head -n 1 <<<"$out")")"
-    emit "agents off" "agentuxd is not running or not reachable${reason:+: $reason}${nl}$click" offline
+out="$(timeout 4 aux ps --json 2>/dev/null)"
+status=$?
+
+if (( status != 0 )) || ! jq -e '.daemon == "up"' >/dev/null 2>&1 <<<"$out"; then
+    if (( status == 3 )) || jq -e '.daemon == "down"' >/dev/null 2>&1 <<<"$out"; then
+        emit "agents off" "agentuxd is not running or not reachable.${nl}$click" offline
+    else
+        emit "agents ?" "Could not read aux ps --json (exit $status).${nl}$click" offline
+    fi
     exit 0
 fi
 
-# One record per line: "run<TAB>id<TAB>status<TAB>step<TAB>title — activity"
-# for each run, "req<TAB>id<TAB>run<TAB>kind<TAB>title" for each request
-# waiting for you.
-parsed="$(awk '
-    BEGIN { OFS = "\t" }
-    /^WAITING FOR YOU$/ { section = "requests"; next }
-    /^RUN[ \t]/ { section = "runs"; next }
-    /^$/ { if (section == "runs") section = ""; next }
-    section == "runs" && match($0, / (running|waiting|done|failed|cancelled) +[a-z_]+ +gate [0-9]+\/[0-9]+ rev [0-9]+\/[0-9]+ +/) {
-        split(substr($0, RSTART + 1, RLENGTH - 1), f, / +/)
-        print "run", $1, f[1], f[2], substr($0, RSTART + RLENGTH)
-        next
-    }
-    section == "requests" && match($0, /^[^ ]+ +run [^ ]+ +[a-z_]+ +/) {
-        split(substr($0, 1, RLENGTH), f, / +/)
-        print "req", f[1], f[3], f[4], substr($0, RSTART + RLENGTH)
-    }
-' <<<"$out")"
-
-runs=0 running=0 requests=0
-run_lines="" request_lines=""
-while IFS=$'\t' read -r type id a b rest; do
-    case "$type" in
-        run)
-            runs=$(( runs + 1 ))
-            [[ "$a" == running ]] && running=$(( running + 1 ))
-            run_lines+="${nl}$(escape "$id  $a  $b  $rest")"
-            ;;
-        req)
-            requests=$(( requests + 1 ))
-            request_lines+="${nl}$(escape "$id  $b  run $a  $rest")"
-            ;;
-    esac
-done <<<"$parsed"
-
-if (( runs == 0 && requests == 0 )) && ! grep -q '^no active runs' <<<"$out"; then
-    # Neither a run nor the "no active runs" line: aux printed something
-    # this script does not understand. Say so rather than claim "idle".
-    emit "agents ?" "Could not read aux ps:${nl}$(escape "$(head -n 3 <<<"$out")")${nl}$click" offline
-    exit 0
-fi
-
-tooltip="$runs active run$( (( runs == 1 )) || echo s), $running running$run_lines"
-if (( requests > 0 )); then
-    tooltip+="${nl}${nl}<b>Waiting for you</b> (aux approve / deny / answer)$request_lines"
-    emit "agents $runs · $requests waiting" "$tooltip${nl}${nl}$click" waiting
-elif (( runs > 0 )); then
-    emit "agents $runs" "$tooltip${nl}${nl}$click" running
-else
-    emit "agents 0" "No active runs.${nl}$click" idle
-fi
+# jq builds the text, tooltip and class from the summary, escaping
+# everything that came from the daemon for Pango.
+jq -c --arg click "$click" '
+    def esc: tostring | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+    (.runs // []) as $runs
+    | (.pending // []) as $pending
+    | ($runs | length) as $n
+    | ([$runs[] | select(.status == "running")] | length) as $running
+    | ($pending | length) as $m
+    | ("\($n) active run\(if $n == 1 then "" else "s" end), \($running) running"
+        + ($runs | map("\n" + ("\(.id)  \(.status)  \(.step)  \(.title)"
+            + (if .activity then " — \(.activity)" else "" end)) | esc) | add // ""))
+      as $runs_tip
+    | ($pending | map("\n" + ("\(.id)  \(.kind)  run \(.runId)  \(.title)" | esc)) | add // "")
+      as $pending_tip
+    | if $m > 0 then
+        {text: "agents \($n) · \($m) waiting",
+         tooltip: "\($runs_tip)\n\n<b>Waiting for you</b> (aux approve / deny / answer)\($pending_tip)\n\n\($click)",
+         class: "waiting"}
+      elif $n > 0 then
+        {text: "agents \($n)", tooltip: "\($runs_tip)\n\n\($click)", class: "running"}
+      else
+        {text: "agents 0", tooltip: "No active runs.\n\($click)", class: "idle"}
+      end
+    | .alt = .class
+' <<<"$out" || emit "agents ?" "Could not read aux ps --json.${nl}$click" offline
