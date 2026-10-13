@@ -163,6 +163,12 @@ assert "agentux icon in hicolor and pixmaps" \
     test -f /usr/share/icons/hicolor/scalable/apps/agentux.svg -a -f /usr/share/icons/hicolor/256x256/apps/agentux.png -a -f /usr/share/pixmaps/agentux.png
 assert "kcm-about-distrorc uses the AgentUX logo" \
     grep -qx 'LogoPath=/usr/share/icons/hicolor/256x256/apps/agentux.png' /etc/xdg/kcm-about-distrorc
+# plasma-setup's first-boot wizard loads its background from Fedora's Default
+# wallpaper package, which the Containerfile points at AgentUX's.
+for f in images/5120x2880.jxl images/1440x2960.jxl images_dark/5120x2880.jxl images_dark/1440x2960.jxl; do
+    assert "wallpapers/Default/contents/$f is AgentUX's" \
+        test "$(readlink -f "/usr/share/wallpapers/Default/contents/$f")" = "/usr/share/wallpapers/AgentUX-Default/contents/$f"
+done
 assert "agentuxd enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentuxd.service
 assert "agentux-first-login enabled for all users" \
