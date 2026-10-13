@@ -106,7 +106,7 @@ RUN --mount=type=bind,source=variants,target=/tmp/variants \
     && dnf clean all \
     && sed -i 's/^enabled=1/enabled=0/' "$copr" \
     && cp -a /tmp/variants/hyprland/. / \
-    && chmod 0755 /usr/libexec/agentux/hyprland-* \
+    && chmod 0755 /usr/libexec/agentux/hyprland-* /usr/libexec/agentux/waybar-agents \
     && test -x /usr/bin/start-hyprland \
     && test -f /usr/share/agentux/hyprland/wallpaper.png \
     && grep -qx 'Exec=/usr/libexec/agentux/hyprland-session' /usr/share/wayland-sessions/agentux-hyprland.desktop \
@@ -116,7 +116,10 @@ RUN --mount=type=bind,source=variants,target=/tmp/variants \
     && { grep -qx 'config ok' /tmp/hyprland-verify.txt || { cat /tmp/hyprland-verify.txt >&2; false; }; } \
     && rm -rf "$runtime" /tmp/hyprland-verify.txt \
     && foot --check-config --config /usr/share/agentux/hyprland/user/foot/foot.ini \
-    && jq empty /usr/share/agentux/hyprland/user/waybar/config.jsonc
+    && jq empty /usr/share/agentux/hyprland/user/waybar/config.jsonc \
+    && /usr/libexec/agentux/waybar-agents > /tmp/waybar-agents.json \
+    && jq -e '.class == "offline"' /tmp/waybar-agents.json \
+    && rm /tmp/waybar-agents.json
 
 # Identity: the system calls itself AgentUX (os-release NAME is what the
 # first-boot wizard's "Powered by", the boot menu, hostnamectl and KDE's About
