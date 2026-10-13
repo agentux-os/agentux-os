@@ -207,11 +207,24 @@ EOF
     cp /var/tmp/install-test.ks "$defaults"
     echo "      kickstart:"; indent </var/tmp/install-test.ks
     local start=$SECONDS rc
-    # liveinst itself, as it runs after pkexec (as root, PKEXEC_UID naming
-    # the live user, whose session environment it imports for Anaconda),
-    # with Anaconda in non-interactive text mode instead of the GUI.
-    PKEXEC_UID="$(id -u "$user")" LIVECMD="anaconda --liveinst --cmdline" liveinst >/var/tmp/anaconda-test.out 2>&1
-    rc=$?
+    # What liveinst does after its pkexec, minus the web UI (which it always
+    # starts when anaconda-webui is installed): as root, with PKEXEC_UID
+    # naming the live user and that user's session environment, which
+    # Anaconda uses in live mode; then Anaconda in non-interactive text mode.
+    rc=0
+    (
+        uid="$(id -u "$user")"
+        while IFS= read -r variable; do
+            export "${variable?}"
+        done < <(runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user show-environment)
+        export PKEXEC_UID="$uid" HOME="/var/home/$user" XDG_CONFIG_HOME="/var/home/$user/.config" PATH="/usr/sbin:/usr/bin"
+        exec anaconda --liveinst --cmdline
+    ) >/var/tmp/anaconda-test.out 2>&1 || rc=$?
+    # Anaconda can exit 0 without installing; the disk tells.
+    if [[ "$rc" == 0 ]] && ! lsblk -lnpo FSTYPE "$target" | grep -qE 'btrfs|xfs|ext4'; then
+        echo "      no filesystem on $target after the install"
+        rc=1
+    fi
     echo "metric  install time: $(( SECONDS - start ))s"
     tail -n 40 /var/tmp/anaconda-test.out | indent
     if [[ "$rc" == 0 ]] && ! grep -qi 'traceback\|installation failed' /var/tmp/anaconda-test.out; then
