@@ -187,9 +187,13 @@ target=/dev/vda
 
 phase_install() {
     test -b "$target" || { bad "no $target to install to"; return; }
+    # Anaconda ignores --kickstart in live mode and reads only its
+    # interactive defaults (which %include the live payload), so the answers
+    # go in front of those, in this VM's live overlay only.
+    local defaults=/usr/share/anaconda/interactive-defaults.ks
     cat >/var/tmp/install-test.ks <<EOF
 # Live ISO test install. Answers what the interactive installer asks; the
-# payload is the live installer's own.
+# payload is the live installer's own (the interactive defaults below).
 text
 lang en_US.UTF-8
 keyboard us
@@ -200,12 +204,13 @@ clearpart --all --initlabel --drives=${target#/dev/}
 autopart --noswap
 rootpw --lock
 user --name=installtest --password=installtest --plaintext --groups=wheel
-%include /usr/share/agentux/live/install.ks
 EOF
+    cat "$defaults" >>/var/tmp/install-test.ks
+    cp /var/tmp/install-test.ks "$defaults"
     echo "      kickstart:"; indent </var/tmp/install-test.ks
     local start=$SECONDS rc
     # As liveinst would run it, minus the GUI; Anaconda wants a session bus.
-    dbus-run-session -- anaconda --liveinst --cmdline --kickstart /var/tmp/install-test.ks >/var/tmp/anaconda-test.out 2>&1
+    dbus-run-session -- anaconda --liveinst --cmdline >/var/tmp/anaconda-test.out 2>&1
     rc=$?
     echo "metric  install time: $(( SECONDS - start ))s"
     tail -n 40 /var/tmp/anaconda-test.out | indent
