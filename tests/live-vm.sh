@@ -274,6 +274,7 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     install_rc=${PIPESTATUS[0]}
     set -e
     guest_cmd 120 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1 || true
+    guest_cmd 120 'cat /tmp/storage.log /tmp/dbus.log 2>/dev/null' >"$dir/anaconda-storage.log" 2>&1 || true
     echo "::endgroup::"
     summary_phase "Install from the live system (best effort)" "$install_rc" "$dir/install.log"
     if [[ "$install_rc" == 0 ]]; then

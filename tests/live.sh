@@ -215,6 +215,7 @@ EOF
         bad "anaconda failed (exit $rc)"
         tail -n 80 /tmp/anaconda.log 2>/dev/null | indent
         tail -n 80 /tmp/packaging.log 2>/dev/null | indent
+        grep -E " (ERR|WRN) " /tmp/storage.log 2>/dev/null | tail -n 40 | indent
     fi
 }
 
