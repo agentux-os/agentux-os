@@ -207,10 +207,10 @@ EOF
     cp /var/tmp/install-test.ks "$defaults"
     echo "      kickstart:"; indent </var/tmp/install-test.ks
     local start=$SECONDS rc
-    # As liveinst would run it, minus the GUI; Anaconda wants a session bus.
-    # PKEXEC_UID: liveinst runs Anaconda through pkexec, which tells it the
-    # live user (whose session it asks about the keyboard).
-    PKEXEC_UID="$(id -u "$user")" dbus-run-session -- anaconda --liveinst --cmdline >/var/tmp/anaconda-test.out 2>&1
+    # liveinst itself, as it runs after pkexec (as root, PKEXEC_UID naming
+    # the live user, whose session environment it imports for Anaconda),
+    # with Anaconda in non-interactive text mode instead of the GUI.
+    PKEXEC_UID="$(id -u "$user")" LIVECMD="anaconda --liveinst --cmdline" liveinst >/var/tmp/anaconda-test.out 2>&1
     rc=$?
     echo "metric  install time: $(( SECONDS - start ))s"
     tail -n 40 /var/tmp/anaconda-test.out | indent
