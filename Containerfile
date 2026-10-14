@@ -185,8 +185,11 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y%m%d)}" \
 # Default is a symlink (desktop-backgrounds-kde's) to the F44 package
 # (f44-backgrounds-kde's). Point it, and so Fedora -> Default too, at an
 # AgentUX package with those files, rendered here with ImageMagick (in the
-# base image, with librsvg and libjxl) from the brand's key art in
-# wallpaper/, copied from brand/art/ in agentux-os/agentux. The F44 package
+# base image, with librsvg and libjxl) from wallpaper/wizard-*.svg: the
+# brand's key art (wallpaper/wallpaper-*.svg, copied from brand/art/ in
+# agentux-os/agentux) with the mark moved smaller to the lower third by
+# wallpaper/build.py, clear of the wizard's centred text and buttons; the
+# portrait file is the middle of it. The F44 package
 # stays as it is. Whatever else falls back to Default (the login screen
 # without its AgentUX drop-in, new wallpaper settings) gets AgentUX too.
 # `rpm -V desktop-backgrounds-kde` reports the changed symlink; that is this.
@@ -197,10 +200,10 @@ RUN --mount=type=bind,source=wallpaper,target=/tmp/wallpaper \
     && mkdir -p "$pkg/contents/images" "$pkg/contents/images_dark" \
     && cp /tmp/wallpaper/metadata.json "$pkg/metadata.json" \
     && for variant in light:images dark:images_dark; do \
-        svg="/tmp/wallpaper/wallpaper-${variant%%:*}.svg" \
+        svg="/tmp/wallpaper/wizard-${variant%%:*}.svg" \
         && out="$pkg/contents/${variant#*:}" \
         && magick -density 128 "$svg" -alpha off -depth 8 -quality 90 "$out/5120x2880.jxl" \
-        && magick -density 131.5556 "$svg" -alpha off -crop 1440x2960+2810+0 +repage -depth 8 -quality 90 "$out/1440x2960.jxl" \
+        && magick -density 131.5556 "$svg" -alpha off -crop 1440x2960+1911+0 +repage -depth 8 -quality 90 "$out/1440x2960.jxl" \
         && test "$(magick identify -format '%m %wx%h' "$out/5120x2880.jxl")" = "JXL 5120x2880" \
         && test "$(magick identify -format '%m %wx%h' "$out/1440x2960.jxl")" = "JXL 1440x2960" \
         || exit 1; \
@@ -247,12 +250,20 @@ RUN dnf -y install plymouth-plugin-script \
 # never touching grub.cfg, the boot entries or grubenv (see
 # /usr/libexec/agentux/grub-theme). Fail the build if bootupd's static
 # config stops sourcing console.cfg. The font is GRUB's Unifont.
+# GRUB's boot-success flag (grub-boot-success.timer, a user unit, runs
+# grub2-set-bootflag two minutes into a session) is for grub2-mkconfig's
+# menu_auto_hide; bootupd's static grub.cfg always shows the menu and never
+# reads it, and bootc mounts /boot read-only, so the service could only fail.
+# Disable the timer and mask the service, as the live layer does.
 RUN chmod 0755 /usr/libexec/agentux/grub-theme \
     && grep -q 'console\.cfg' /usr/lib/bootupd/grub2-static/grub-static-pre.cfg \
     && cp /usr/share/grub/unicode.pf2 /usr/share/agentux/grub/unicode.pf2 \
     && test -f /usr/share/agentux/grub/theme.txt \
     && test -f /usr/share/agentux/grub/background.png \
-    && systemctl enable agentux-grub-theme.service
+    && systemctl enable agentux-grub-theme.service \
+    && systemctl --global disable grub-boot-success.timer \
+    && systemctl --global mask grub-boot-success.service \
+    && test ! -e /etc/systemd/user/timers.target.wants/grub-boot-success.timer
 
 # Updates of this image (bootc upgrade/switch pull through containers/image)
 # must carry a cosign signature from the AgentUX key shipped in files/. Only
