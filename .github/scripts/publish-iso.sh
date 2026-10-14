@@ -172,8 +172,10 @@ sums() {
     while read -r f; do
         s3 cp "s3://$bucket/$d/$f" "$work/$f"
         # One line, "<sha256>  <file>.iso", naming a file in this directory.
-        grep -Eq '^[0-9a-f]{64}  [^/ ]+\.iso$' "$work/$f" && [[ $(wc -l <"$work/$f") == 1 ]] \
-            || { echo "::error::$d/$f is not a single sha256sum line"; return 1; }
+        if ! grep -Eq '^[0-9a-f]{64}  [^/ ]+\.iso$' "$work/$f" || [[ $(wc -l <"$work/$f") != 1 ]]; then
+            echo "::error::$d/$f is not a single sha256sum line"
+            return 1
+        fi
         cat "$work/$f" >>"$work/SHA256SUMS"
     done <"$work/list"
     sign "$work/SHA256SUMS"
