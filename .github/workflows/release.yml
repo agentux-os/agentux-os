@@ -1,0 +1,176 @@
+name: Release
+
+# A v* tag, from build to the stable channel:
+#
+#   1. build     both images, for both architectures, from the tagged commit
+#                (build.yml): smoke-tested, signed (keyless and with the
+#                AgentUX key) and checked against the shipped policy, then
+#                pushed as candidate-<tag>. Nothing public moves.
+#   2. candidate the tag must be on main; resolve candidate-<tag> to its
+#                digests once, so everything after builds from and promotes
+#                exactly those.
+#   3. iso, live the installer and live ISOs (plasma, x86_64 and aarch64),
+#                built from the candidate digest and following :stable; the
+#                x86_64 live ISO is booted and installed in a VM.
+#   4. release   waits for the owner's approval (the `release` environment:
+#                v* tags only, wendelmax as required reviewer), then moves
+#                :<tag> and :stable to the candidate digests, publishes the
+#                ISOs in iso/<tag>/ and iso/stable/ on download.agentuxos.org
+#                and creates the GitHub release.
+#
+# Approving is the last step, after every build and test of the tag passed;
+# rejecting it (or letting it time out) leaves :stable, the downloads and the
+# releases untouched. :latest is not involved: it stays the nightly channel
+# that build.yml moves from main.
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    secrets: inherit
+
+  candidate:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      plasma: ${{ steps.digests.outputs.plasma }}
+      hyprland: ${{ steps.digests.outputs.hyprland }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Only reviewed code is released: the tagged commit must be on main.
+      - name: Check the tag is on main
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main; tag a commit of main"
+            exit 1
+          fi
+
+      - uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Resolve the candidate digests
+        id: digests
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          for pair in plasma=agentux hyprland=agentux-hyprland; do
+            repo="ghcr.io/$OWNER/${pair#*=}"
+            digest="sha256:$(skopeo inspect --raw --creds "${{ github.actor }}:$TOKEN" "docker://$repo:candidate-$GITHUB_REF_NAME" | sha256sum | cut -d' ' -f1)"
+            cosign verify --key files/etc/pki/containers/agentux-os.pub "$repo@$digest" > /dev/null
+            echo "$repo:candidate-$GITHUB_REF_NAME -> $digest (signed)"
+            echo "${pair%%=*}=$digest" >> "$GITHUB_OUTPUT"
+            echo "- \`$repo@$digest\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  iso:
+    needs: candidate
+    uses: ./.github/workflows/iso.yml
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    with:
+      variant: plasma
+      image: ghcr.io/${{ github.repository_owner }}/agentux@${{ needs.candidate.outputs.plasma }}
+      channel: stable
+    secrets: inherit
+
+  live:
+    needs: candidate
+    uses: ./.github/workflows/live.yml
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    with:
+      variant: plasma
+      arch: both
+      image: ghcr.io/${{ github.repository_owner }}/agentux@${{ needs.candidate.outputs.plasma }}
+      channel: stable
+    secrets: inherit
+
+  # The gate: this job waits for the owner's approval in the `release`
+  # environment. Its R2 credentials (and a copy of the signing key) are
+  # environment secrets, so only an approved v* tag run can publish.
+  release:
+    needs: [candidate, iso, live]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    permissions:
+      contents: write # the GitHub release
+      packages: write # the :<tag> and :stable tags
+      actions: read # the ISO artifacts of this run
+    env:
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+            /usr/local/.ghcup /usr/local/share/powershell /usr/local/julia* \
+            /usr/lib/jvm /opt/microsoft /opt/google /opt/az
+          sudo docker image prune --all --force
+          df -h /
+
+      - uses: sigstore/cosign-installer@v4.1.2
+
+      # First the images, so :stable exists before any ISO that follows it
+      # can be downloaded.
+      - name: Promote the images to :${{ github.ref_name }} and :stable
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLASMA: ${{ needs.candidate.outputs.plasma }}
+          HYPRLAND: ${{ needs.candidate.outputs.hyprland }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          echo "$TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
+          echo "## Promoted" >> "$GITHUB_STEP_SUMMARY"
+          .github/scripts/promote.sh "ghcr.io/$OWNER/agentux" "$PLASMA" "$GITHUB_REF_NAME" stable
+          .github/scripts/promote.sh "ghcr.io/$OWNER/agentux-hyprland" "$HYPRLAND" "$GITHUB_REF_NAME" stable
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agentux*-${{ github.ref_name }}-*
+          path: ${{ runner.temp }}/isos
+          merge-multiple: true
+
+      - name: Publish the ISOs and the GitHub release
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          EXPECT: >-
+            agentux-${{ github.ref_name }}-x86_64 agentux-${{ github.ref_name }}-aarch64
+            agentux-live-${{ github.ref_name }}-x86_64 agentux-live-${{ github.ref_name }}-aarch64
+        run: |
+          ls -lh "$RUNNER_TEMP/isos"
+          echo "## Published" >> "$GITHUB_STEP_SUMMARY"
+          .github/scripts/publish-iso.sh release "$RUNNER_TEMP/isos"

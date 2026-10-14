@@ -7,7 +7,8 @@
 # middle of the installer.
 set -uo pipefail
 
-image="$(cat /usr/share/agentux/live/install-image 2>/dev/null || echo "the AgentUX image")"
+# The channel's name reads better than a release's digest.
+image="$(cat /usr/share/agentux/live/track-image 2>/dev/null || echo "the AgentUX image")"
 
 message() {
     if command -v kdialog >/dev/null; then

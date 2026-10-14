@@ -9,14 +9,30 @@ on:
         options: [plasma, hyprland]
         default: plasma
       image:
-        description: Image to build the installer from instead of the variant's :latest (e.g. a test-<sha> tag)
+        description: Image to build the installer from instead of the variant's :latest (e.g. a test-<sha> tag or a digest)
         default: ""
+      channel:
+        description: Channel the installed system follows (stable falls back to latest while no :stable exists)
+        type: choice
+        options: [latest, stable]
+        default: latest
       publish:
-        description: Publish the ISO on download.agentuxos.org (iso/builds/ and iso/latest/)
+        description: Publish the ISO on download.agentuxos.org (iso/nightly/; only from main)
         type: boolean
         default: false
-  push:
-    tags: ["v*"]
+  # A v* tag: release.yml calls this with the tag's candidate digest and the
+  # stable channel, and publishes the ISOs itself once the release is approved.
+  workflow_call:
+    inputs:
+      variant:
+        type: string
+        default: plasma
+      image:
+        type: string
+        default: ""
+      channel:
+        type: string
+        default: latest
   schedule:
     - cron: "30 9 * * 1" # weekly, Monday, after the nightly image build
   # Check that the installer still builds when its definition changes.
@@ -24,11 +40,16 @@ on:
     paths:
       - .github/workflows/iso.yml
       - .github/scripts/pull.sh
+      - .github/scripts/channel.sh
       - disk_config/iso.toml
 
 env:
+  # What the ISO is built from: an explicit image (release.yml passes the
+  # tag's digest), or the variant's :latest.
   IMAGE: ${{ inputs.image || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
-  # The ISO's file name: agentux-<date>-<arch> or agentux-hyprland-<date>-<arch>.
+  REPO: ${{ inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland' || 'ghcr.io/agentux-os/agentux' }}
+  CHANNEL: ${{ inputs.channel || 'latest' }}
+  # The ISO's file name: agentux-<version>-<arch> or agentux-hyprland-<version>-<arch>.
   ISO_PREFIX: ${{ inputs.variant == 'hyprland' && 'agentux-hyprland' || 'agentux' }}
   BIB: quay.io/centos-bootc/bootc-image-builder:latest
 
@@ -51,7 +72,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     permissions:
-      contents: write # the GitHub release, for a tag
+      contents: read
       packages: read
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +96,14 @@ jobs:
             exit 1
           fi
 
+      # The channel the installed system follows (TRACK_IMAGE): :stable for
+      # a release, :latest otherwise (see .github/scripts/channel.sh).
+      - name: Pick the channel
+        if: steps.arch.outputs.ok == 'true'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/channel.sh
+
       # The image, the builder and the ISO together need far more than the
       # ~20 GB a fresh runner has free.
       - name: Free disk space
@@ -89,7 +118,10 @@ jobs:
           df -h /
 
       # bootc-image-builder runs rootful and reads the image from root's
-      # container storage.
+      # container storage. It names the image it was given in the installed
+      # system's origin (the %post `bootc switch` of its kickstart), so the
+      # image is tagged there as the channel it should follow: a release ISO
+      # embeds the tag's digest and follows :stable.
       - name: Pull image
         if: steps.arch.outputs.ok == 'true'
         env:
@@ -99,6 +131,10 @@ jobs:
           # With retries: registry CDNs drop blob downloads now and then.
           sudo .github/scripts/pull.sh "$IMAGE" "$BIB"
           test "$(sudo podman image inspect --format '{{.Architecture}}' "$IMAGE")" = "${{ matrix.goarch }}"
+          if [ "$IMAGE" != "$TRACK_IMAGE" ]; then
+            sudo podman tag "$(sudo podman image inspect --format '{{.Id}}' "$IMAGE")" "$TRACK_IMAGE"
+          fi
+          sudo podman image ls
 
       - name: Build ISO
         if: steps.arch.outputs.ok == 'true'
@@ -114,7 +150,7 @@ jobs:
             --rootfs btrfs \
             --use-librepo=True \
             --chown "$(id -u):$(id -g)" \
-            "$IMAGE"
+            "$TRACK_IMAGE"
 
       - name: Name and checksum the ISO
         if: steps.arch.outputs.ok == 'true'
@@ -129,6 +165,7 @@ jobs:
           sha256sum "$name.iso" > "$name.iso.sha256"
           ls -lh "$name.iso"
           echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "ISO \`$name.iso\` ($(du -h "$name.iso" | cut -f1)), installs \`$IMAGE\` and follows \`$TRACK_IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: steps.arch.outputs.ok == 'true'
@@ -141,13 +178,29 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      # download.agentuxos.org, and the GitHub release for a tag
-      # (.github/scripts/publish-iso.sh): tags, the weekly build and a
-      # dispatch with publish set; never pull requests.
+  # The weekly build and a dispatch with publish set go to iso/nightly/ on
+  # download.agentuxos.org (.github/scripts/publish-iso.sh). Its R2
+  # credentials live in the `nightly` environment, which only main can use.
+  # Tags are published by release.yml, after approval.
+  publish:
+    needs: iso
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: nightly
+    permissions:
+      contents: read
+      actions: read # the ISO artifacts of this run
+    steps:
+      - uses: actions/checkout@v4
       - uses: sigstore/cosign-installer@v4.1.2
-        if: ${{ steps.arch.outputs.ok == 'true' && (github.event_name == 'push' || github.event_name == 'schedule' || inputs.publish) }}
-      - name: Publish the ISO
-        if: ${{ steps.arch.outputs.ok == 'true' && (github.event_name == 'push' || github.event_name == 'schedule' || inputs.publish) }}
+      # This run's ISOs, as their jobs uploaded (and tested) them.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.ISO_PREFIX }}-2*
+          path: ${{ runner.temp }}/isos
+          merge-multiple: true
+      - name: Publish the ISOs
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -155,7 +208,4 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
-          LATEST: ${{ env.ISO_PREFIX }}-${{ matrix.arch }}
-        run: |
-          command -v aws >/dev/null || sudo snap install aws-cli --classic
-          .github/scripts/publish-iso.sh "${{ steps.iso.outputs.name }}" "$LATEST"
+        run: .github/scripts/publish-iso.sh nightly "$RUNNER_TEMP/isos"

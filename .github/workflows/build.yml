@@ -7,6 +7,9 @@ on:
   schedule:
     - cron: "0 6 * * *" # daily, to pick up Fedora updates
   workflow_dispatch:
+  # A v* tag runs this from release.yml, which then promotes the tag's image
+  # to :stable once the owner approves (see release.yml).
+  workflow_call:
 
 # Two images from the one Containerfile (build arg VARIANT): plasma is
 # ghcr.io/<owner>/agentux, hyprland is ghcr.io/<owner>/agentux-hyprland. Each
@@ -17,7 +20,9 @@ env:
   # once signed and verified, :latest. A dispatch from any other branch
   # (gh workflow run build.yml --ref <branch>) pushes only test-<sha> (and
   # its per-architecture test-<sha>-<arch>) to exercise signing and the
-  # policy, and never touches :latest or a dated tag.
+  # policy, and never touches :latest or a dated tag. A v* tag (through
+  # release.yml) pushes, signs and checks candidate-<tag> only; release.yml
+  # moves :<tag> and :stable to that digest after approval.
   PUBLISH: ${{ github.event_name != 'pull_request' }}
   RELEASE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
 
@@ -71,7 +76,9 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           echo "$TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
-          if [ "$RELEASE" = true ]; then stage=ci-staging; else stage="test-${GITHUB_SHA::12}"; fi
+          if [ "$RELEASE" = true ]; then stage=ci-staging
+          elif [[ $GITHUB_REF == refs/tags/v* ]]; then stage="candidate-$GITHUB_REF_NAME"
+          else stage="test-${GITHUB_SHA::12}"; fi
           mkdir -p "$RUNNER_TEMP/digests"
           podman push --digestfile "$RUNNER_TEMP/digests/$ARCH" agentux:ci "docker://${IMAGE}:${stage}-${ARCH}"
           echo "pushed ${IMAGE}:${stage}-${ARCH}@$(cat "$RUNNER_TEMP/digests/$ARCH")"
@@ -146,7 +153,9 @@ jobs:
           echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           amd64="$(cat "$RUNNER_TEMP/digests/amd64")"
           arm64="$(cat "$RUNNER_TEMP/digests/arm64")"
-          if [ "$RELEASE" = true ]; then tag=ci-staging; else tag="test-${GITHUB_SHA::12}"; fi
+          if [ "$RELEASE" = true ]; then tag=ci-staging
+          elif [[ $GITHUB_REF == refs/tags/v* ]]; then tag="candidate-$GITHUB_REF_NAME"
+          else tag="test-${GITHUB_SHA::12}"; fi
           # imagetools references the pushed images as they are: their
           # digests, and so their signatures, stay valid inside the list.
           docker buildx imagetools create --tag "${IMAGE}:${tag}" \
@@ -197,7 +206,9 @@ jobs:
       - name: Verify with cosign
         env:
           DIGESTS: ${{ steps.list.outputs.digest }} ${{ steps.list.outputs.amd64 }} ${{ steps.list.outputs.arm64 }}
-          IDENTITY: https://github.com/${{ github.workflow_ref }}
+          # This workflow's own identity, also when release.yml calls it
+          # (Fulcio names the called workflow, github.workflow_ref the caller).
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/build.yml@${{ github.ref }}
         run: |
           for digest in $DIGESTS; do
             cosign verify --key files/etc/pki/containers/agentux-os.pub "${IMAGE}@${digest}" > /dev/null

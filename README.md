@@ -19,6 +19,56 @@ Both are multi-arch, signed and checked the same way, and either can `bootc swit
 
 `ghcr.io/agentux-os/agentux` is a multi-arch image: each tag is a manifest list with a `linux/amd64` and a `linux/arm64` image, and `podman pull`, `bootc switch` and `bootc upgrade` pick the one for the machine they run on. CI builds each natively (GitHub's `ubuntu-24.04` and `ubuntu-24.04-arm` runners, no emulation) from the same `Containerfile`, which installs the AgentUX RPMs for the build's architecture (`uname -m`). The arm64 image targets UEFI machines that Fedora supports on aarch64 (SystemReady servers and workstations, VMs on Apple silicon or Ampere hosts); boards that need their own firmware or kernel are not covered.
 
+## Release channels
+
+Each image repository has two channels, and an installed system follows exactly one of them:
+
+| Tag | Channel | Moves |
+|---|---|---|
+| `:stable` | **Stable**: the newest release | When the owner approves a `v*` tag, to that tag's image |
+| `:v<version>` (e.g. `:v0.5.0`) | One release | Never: set once, when its release is approved |
+| `:latest` | **Nightly** (testing): `main`, rebuilt daily for Fedora's updates | Every day, and on every merge to `main` |
+| `:<YYYYMMDD>` | One nightly build | Never |
+
+Both channels exist for both variants (`ghcr.io/agentux-os/agentux` and `ghcr.io/agentux-os/agentux-hyprland`), both are multi-arch, and every image in either is signed and checked the same way ([Verifying the image](#verifying-the-image)).
+
+**Which channel a system follows** is the image reference in its origin, shown by `sudo bootc status`, and `bootc upgrade` pulls whatever that tag points at:
+
+- Systems installed from a **release ISO** (`iso/stable/` or `iso/v<version>/` on download.agentuxos.org, or the links in a GitHub release) follow `:stable`.
+- Systems installed from a **nightly ISO** (`iso/nightly/`), and every system installed before the channels existed (all installs so far), follow `:latest`. Nothing moves them: they stay on the nightly channel until you switch.
+
+Switch channels at any time, either way:
+
+```sh
+sudo bootc switch ghcr.io/agentux-os/agentux:stable   # releases only
+sudo bootc switch ghcr.io/agentux-os/agentux:latest   # nightly builds
+systemctl reboot
+```
+
+(`agentux-hyprland` for the Hyprland variant.) Going from `:latest` to `:stable` usually moves to an older image, since a release is a nightly build from some days or weeks earlier; that is fine on an image-based system, and `sudo bootc rollback` returns to the previous deployment. Until the first release is approved there is no `:stable` (`bootc switch` to it fails with "manifest unknown"), so stay on `:latest` until then; the ISO workflows fall back to `:latest` too if asked for `:stable` before it exists.
+
+### How a release reaches `:stable`
+
+Pushing a `v*` tag of a commit on `main` runs [`release.yml`](.github/workflows/release.yml):
+
+1. **Build.** Both variants, both architectures, from the tagged commit, exactly as a nightly build ([`build.yml`](.github/workflows/build.yml), called by `release.yml`): smoke-tested, signed keyless and with the AgentUX key, checked against the shipped policy, and pushed as `candidate-<tag>`. No public tag moves.
+2. **Candidate.** The tag must be on `main`. `candidate-<tag>` is resolved once to its digests, which everything after works from.
+3. **ISOs.** The installer and live ISOs (Plasma, x86_64 and aarch64) are built from the candidate digest and set up to follow `:stable`; the x86_64 live ISO is booted and installed in a VM. A release live ISO installs the candidate digest itself (not whatever a tag points at by then), so it installs exactly what was tested and released, and the installed system then follows `:stable`.
+4. **Approval.** The `release` job waits in the `release` [environment](https://docs.github.com/actions/deployment/targeting-different-environments/using-environments-for-deployment), which only `v*` tags can use and which needs the repository owner's approval. Approving it is the last step, after every build and test of the tag passed. Rejecting it, or letting it time out, publishes nothing. Approve within 14 days: the release job publishes the ISO artifacts the run built and tested, which expire then (re-run the workflow after that).
+5. **Promotion and publishing.** On approval, `:<tag>` and `:stable` of both images are pointed at the candidate digests ([`.github/scripts/promote.sh`](.github/scripts/promote.sh): a copy of the signed manifest list with its digest preserved, so the signatures, which are stored by digest, carry over; the key and keyless signatures are verified again on the new tags and on each architecture's image). Then the ISOs go to `iso/<tag>/` and `iso/stable/` on download.agentuxos.org, and the GitHub release is created.
+
+### Signing and approval: what the gate does and does not do
+
+One AgentUX key signs every image, nightly or release, and installed systems' policy accepts any image in the AgentUX repositories signed with it, whatever its tag: `containers/image` checks signatures per repository and by digest, and cosign signs digests, not tags. The nightly channel must stay signed with that key (every installed system so far follows `:latest` and refuses anything else), so the key cannot move behind the approval: build.yml signs every build of `main` with it, and stays a repository secret (`COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`).
+
+So the approval gates **what the stable channel and the downloads point at**, not what the key can sign:
+
+- Nothing reaches `:stable`, `:v<version>`, `iso/stable/`, `iso/v<version>/` or a GitHub release without the owner approving that tag's run, after its tests; a tag that is not on `main` fails before that.
+- Writing to download.agentuxos.org needs the R2 credentials, which belong in the environments, not the repository: the `release` environment (approved `v*` tags) for releases and the `nightly` environment (only `main`, no approval) for the weekly ISOs, so a workflow run from any other branch cannot write to the bucket.
+- Anyone who can run a workflow with the repository secrets (a collaborator with write access, from any branch) can still have an image signed with the key, and every installed system, on either channel, would accept that image if it were pushed to a tag the system follows. The key is the root of trust for both channels; protecting it is protecting all of them. Pull requests from forks get no secrets, so the key is as safe as the set of people and tokens with write access to this repository.
+
+Two stronger options were left for later, since each needs every installed system to take a new policy first: a separate **release key**, required only for `:stable` (containers-policy.json can scope a requirement to `repository:tag`), held only in the `release` environment; or the image key itself moved into an environment limited to `main` and `v*` tags (no reviewers, so nightly signing keeps working), which would end keyed signing of branch test builds (`gh workflow run build.yml --ref <branch>`).
+
 ## What the image contains
 
 - **Base:** Fedora Kinoite — immutable `/usr`, atomic updates, previous image always bootable for rollback.
@@ -116,14 +166,14 @@ The live ISO's menu is Titanoboa's: it generates the ISO's `grub.cfg` from the e
 
 ## Try it live
 
-The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download the newest one from **[download.agentuxos.org/iso/latest/agentux-live-x86_64.iso](https://download.agentuxos.org/iso/latest/agentux-live-x86_64.iso)** ([`.sha256`](https://download.agentuxos.org/iso/latest/agentux-live-x86_64.iso.sha256)), or a tagged one from the [releases](https://github.com/agentux-os/agentux-os/releases), check it against its `.sha256` (see [Downloads](#downloads)) and write it to a USB stick as above. Each run also keeps its ISO as an artifact for 14 days (`hyprland` builds `agentux-hyprland-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test). It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
+The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download the newest release from **[download.agentuxos.org/iso/stable/agentux-live-x86_64.iso](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso)** ([`.sha256`](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso.sha256)), a given one from the [releases](https://github.com/agentux-os/agentux-os/releases), or the newest weekly build from `iso/nightly/` (see [Downloads](#downloads)), check it against its `.sha256` (see [Downloads](#downloads)) and write it to a USB stick as above. Each run also keeps its ISO as an artifact for 14 days (`hyprland` builds `agentux-hyprland-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test). It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
 
 What you get:
 
 - **The real desktop.** The live system is the published image plus a thin live layer: GRUB's "Try or install AgentUX" entry logs a passwordless `liveuser` straight into Plasma (or the AgentUX Hyprland session on the hyprland ISO) with the AgentUX theme, wallpaper, panel and cockpit, as on an installed system.
 - **A demo with fake agents.** Agent CLIs need vendor logins, so the live session's `agentuxd` runs with `--fake-agents`, a scripted stand-in that answers every agent step. At login it sets up `~/agentux-demo`, a small project whose `agentux.yaml` mirrors the default pipeline (Claude Code plans, OpenCode implements, Codex reviews), and starts two runs: one already approved, which runs through the gate and review to its pull request, and "Add a /health endpoint", which waits in the cockpit's inbox for you to approve its plan. A note on the desktop explains it; `aux ps` and `aux watch <run>` work in a terminal too.
 - **No downloads at login.** On an installed system first login downloads the agent CLIs and Antigravity's ACP server (together over 1 GB); live, they would sit in RAM. The live session does not start `agentux-first-login.service` at login: **Install the agent CLIs** on the desktop starts it on demand. `agentux-antigravity-acp.service` never runs live (a drop-in adds `ConditionKernelCommandLine=!rd.live.image`).
-- **Install AgentUX** (desktop, panel and menu) opens Anaconda's web installer, in AgentUX's colours with the mark in its title bar. You pick the language, keyboard and disk; the account is created by the first-boot wizard (plasma-setup) when the installed system starts, as on Fedora Kinoite. It installs `ghcr.io/agentux-os/agentux:latest` (`agentux-hyprland` from the hyprland ISO) **from the registry**, so it needs an internet connection (the launcher checks first and says so; use the installer ISO to install offline). The pull goes through the image's own signature policy, so only an image signed with the AgentUX key installs, and the installed system tracks `:latest` exactly as one installed from the installer ISO (`bootc switch --mutate-in-place --transport registry`, as bootc-image-builder's installer does). Nothing from the live session is installed: it is not the live root that gets copied.
+- **Install AgentUX** (desktop, panel and menu) opens Anaconda's web installer, in AgentUX's colours with the mark in its title bar. You pick the language, keyboard and disk; the account is created by the first-boot wizard (plasma-setup) when the installed system starts, as on Fedora Kinoite. It installs the AgentUX image **from the registry** (`agentux-hyprland` from the hyprland ISO), so it needs an internet connection (the launcher checks first and says so; use the installer ISO to install offline): a release ISO installs its release's image by digest, exactly what was tested and released, and leaves the system following `:stable`; a nightly ISO installs `:latest` and follows it (see [Release channels](#release-channels); `live.yml` passes both references to the live layer as `INSTALL_IMAGE` and `TRACK_IMAGE`). The pull goes through the image's own signature policy, so only an image signed with the AgentUX key installs, and the installed system tracks its channel exactly as one installed from the installer ISO (`bootc switch --mutate-in-place --transport registry`, as bootc-image-builder's installer does). Nothing from the live session is installed: it is not the live root that gets copied.
 
 How it is built: [`live/Containerfile`](live/Containerfile) starts from the published image and runs [`live/build.sh`](live/build.sh), which adds everything live-only; [Titanoboa](https://github.com/ublue-os/titanoboa) (Universal Blue's live ISO builder, used for Bazzite's and Bluefin's live ISOs) squashes that image into `LiveOS/squashfs.img` and writes the ISO with its kernel, initramfs and the GRUB entries from `/usr/lib/bootc-image-builder/iso.yaml`. The live layer:
 
@@ -138,28 +188,30 @@ Live mode is visible to scripts as `rd.live.image` on the kernel command line, a
 
 ## Downloads
 
-ISOs are published on **download.agentuxos.org**, a Cloudflare R2 bucket: GitHub limits release files to 2 GiB and every ISO is larger (the installer about 4.7 GB, the live ISO about 3.7 GB). [`.github/scripts/publish-iso.sh`](.github/scripts/publish-iso.sh) uploads them from the ISO workflows, only after the live ISO passed its boot and install test:
+ISOs are published on **download.agentuxos.org**, a Cloudflare R2 bucket: GitHub limits release files to 2 GiB and every ISO is larger (the installer about 4.7 GB, the live ISO about 3.7 GB). [`.github/scripts/publish-iso.sh`](.github/scripts/publish-iso.sh) uploads them, only after every ISO of the run built and the x86_64 live ISO passed its boot and install test:
 
-| Path | What |
-|---|---|
-| `iso/latest/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest published build |
-| `iso/v<version>/…-v<version>-<arch>.iso` | A tag's build; its [GitHub release](https://github.com/agentux-os/agentux-os/releases) carries the checksums and the links |
-| `iso/builds/…-<date>-<arch>.iso` | Weekly builds, and runs dispatched with **publish** |
+| Path | What | Installs and follows |
+|---|---|---|
+| `iso/stable/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest release | `:stable` |
+| `iso/v<version>/…-v<version>-<arch>.iso` | Every release, kept; its [GitHub release](https://github.com/agentux-os/agentux-os/releases) carries the checksums and the links | `:stable` |
+| `iso/nightly/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest weekly build, or a run dispatched with **publish** from `main`; replaced each time | `:latest` |
 
-Next to every ISO is `<name>.iso.sha256` and `<name>.iso.sha256.sigstore.json`, a cosign signature of the checksum with the key that signs the images:
+Releases are published by [`release.yml`](.github/workflows/release.yml) after the owner approves the tag (see [How a release reaches `:stable`](#how-a-release-reaches-stable)); the weekly builds by the `publish` job of [`iso.yml`](.github/workflows/iso.yml) and [`live.yml`](.github/workflows/live.yml). A nightly copy's `x-amz-meta-build` header names the dated build it came from.
+
+Next to every ISO is `<name>.iso.sha256` (naming the file next to it) and `<name>.iso.sha256.sigstore.json`, a cosign signature of the checksum with the key that signs the images:
 
 ```sh
 sha256sum --check agentux-live-x86_64.iso.sha256
 cosign verify-blob --key files/etc/pki/containers/agentux-os.pub   --bundle agentux-live-x86_64.iso.sha256.sigstore.json agentux-live-x86_64.iso.sha256
 ```
 
-The bucket is written with the repository secrets `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `agentux-downloads` only).
+The bucket is written with the secrets `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `agentux-downloads` only). They belong in the `release` and `nightly` environments, not the repository, so only an approved release or a run on `main` can write the bucket (see [Signing and approval](#signing-and-approval-what-the-gate-does-and-does-not-do)); the publishing jobs read them from their environment, and fall back to repository secrets of the same name while those still exist.
 
 ## Install
 
 ### From the ISO
 
-The [Build ISO](https://github.com/agentux-os/agentux-os/actions/workflows/iso.yml) workflow turns the latest image into an Anaconda installer ISO per architecture with [bootc-image-builder](https://github.com/osbuild/image-builder/tree/main/bootc-image-builder), each built natively: `agentux-<date>-x86_64.iso` for PCs and `agentux-<date>-aarch64.iso` for 64-bit ARM UEFI machines. Download the one for your machine from **[download.agentuxos.org/iso/latest/](https://download.agentuxos.org/iso/latest/agentux-x86_64.iso)** (`agentux-x86_64.iso` or `agentux-aarch64.iso`) or a [release](https://github.com/agentux-os/agentux-os/releases), check it against the `.sha256` next to it (see [Downloads](#downloads)), and write it to a USB stick:
+The [Build ISO](https://github.com/agentux-os/agentux-os/actions/workflows/iso.yml) workflow turns an image (a release's, or the nightly `:latest`) into an Anaconda installer ISO per architecture with [bootc-image-builder](https://github.com/osbuild/image-builder/tree/main/bootc-image-builder), each built natively: `agentux-<version>-x86_64.iso` for PCs and `agentux-<version>-aarch64.iso` for 64-bit ARM UEFI machines. Download the one for your machine from **[download.agentuxos.org/iso/stable/](https://download.agentuxos.org/iso/stable/agentux-x86_64.iso)** (`agentux-x86_64.iso` or `agentux-aarch64.iso`) or a [release](https://github.com/agentux-os/agentux-os/releases), check it against the `.sha256` next to it (see [Downloads](#downloads)), and write it to a USB stick:
 
 ```sh
 sha256sum -c agentux-*.iso.sha256
@@ -168,16 +220,16 @@ sudo dd if=agentux-<date>-<arch>.iso of=/dev/sdX bs=4M status=progress oflag=syn
 
 On ARM, boot the aarch64 ISO through the machine's UEFI firmware (or attach it as the CD of an aarch64 UEFI VM, e.g. UTM or Parallels on Apple silicon, or QEMU with `qemu-efi-aarch64`/`edk2-aarch64`).
 
-The installer is interactive: you pick the disk, language and time zone and create your account. The installed system tracks `ghcr.io/agentux-os/agentux:latest` and updates from it.
+The installer is interactive: you pick the disk, language and time zone and create your account. The image is on the ISO, so it installs offline. A release ISO's installed system follows `ghcr.io/agentux-os/agentux:stable` and updates from it, a nightly ISO's `:latest` ([Release channels](#release-channels)). bootc-image-builder names the image it was given in the installed system's origin, so `iso.yml` hands it the image tagged as the channel (a release's digest, tagged `:stable` in the build's local storage).
 
 This installer still looks like Fedora's (logo, blue title bar): bootc-image-builder assembles its environment from Fedora's packages (`fedora-logos`, `fedora-release`), and its configuration (`[customizations.installer]`: kickstart, Anaconda modules, unattended, sudo, menu timeout, Flatpak payload; `[customizations.iso]`: volume ID, publisher, application ID) offers no logo, product name or theme. The live ISO's installer is the branded one.
 
 ### From an existing Fedora Atomic or bootc system
 
-Switch to the latest image:
+Switch to the stable channel (or `:latest` for the nightly builds, see [Release channels](#release-channels)):
 
 ```sh
-sudo bootc switch ghcr.io/agentux-os/agentux:latest
+sudo bootc switch ghcr.io/agentux-os/agentux:stable
 systemctl reboot
 ```
 
@@ -185,9 +237,9 @@ The same command works on x86_64 and aarch64: the tag is a manifest list and boo
 
 ## Verifying the image
 
-Every image CI publishes is signed twice with [cosign](https://github.com/sigstore/cosign) before `:latest` moves to it, on every digest it publishes: the manifest list and the amd64 and arm64 images in it (a system checks the signature of the image for its architecture, not the list's):
+Every image CI publishes is signed twice with [cosign](https://github.com/sigstore/cosign) before any public tag (`:latest`, a dated tag, `:stable`, `:v<version>`) moves to it, on every digest it publishes: the manifest list and the amd64 and arm64 images in it (a system checks the signature of the image for its architecture, not the list's):
 
-- **keyless**, with the GitHub Actions identity of the build workflow on `main` (Fulcio certificate, recorded in the Rekor transparency log);
+- **keyless**, with the GitHub Actions identity of the build workflow on `main`, or at the release's tag for a release (Fulcio certificate, recorded in the Rekor transparency log);
 - with the **AgentUX signing key**, whose public half is in this repository and in the image at [`/etc/pki/containers/agentux-os.pub`](files/etc/pki/containers/agentux-os.pub).
 
 Check either from any machine:
@@ -195,6 +247,10 @@ Check either from any machine:
 ```sh
 cosign verify ghcr.io/agentux-os/agentux:latest \
   --certificate-identity-regexp '^https://github\.com/agentux-os/agentux-os/\.github/workflows/build\.yml@refs/heads/main$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify ghcr.io/agentux-os/agentux:stable \
+  --certificate-identity-regexp '^https://github\.com/agentux-os/agentux-os/\.github/workflows/build\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 cosign verify --key files/etc/pki/containers/agentux-os.pub ghcr.io/agentux-os/agentux:latest
@@ -225,13 +281,13 @@ jq '.transports.docker["ghcr.io/agentux-os/agentux"]' /etc/containers/policy.jso
 
 and add it by hand if it is not. Do not use `bootc switch --enforce-container-sigpolicy`: it refuses any policy whose default is `insecureAcceptAnything`, which Fedora's is; the per-repository entry above is what enforces the signature.
 
-CI checks the policy the same way a system would: after signing, it runs the image's own `skopeo` with the image's own policy, registries.d and key ([`tests/sigpolicy.sh`](tests/sigpolicy.sh)), once per architecture (`skopeo --override-arch`, so it picks that architecture's image from the list as a system of that architecture would), against the signed list's digest and tag, which must pass, against an unsigned image pushed to `:ci-unsigned` in the same repository, which must be refused for lack of a signature, and against an image from another registry, which must still pass; it also checks that the policy requires the AgentUX key for both repositories. This runs for each variant's repository (`publish (plasma, agentux)`, `publish (hyprland, agentux-hyprland)`). If any of that fails, neither `:latest` nor the dated tag moves: each architecture's image is pushed first under a staging tag (`ci-staging-amd64`, `ci-staging-arm64`), the list under `ci-staging`, and the public tags are copied from the list's digest, unchanged, only after every check passed. To try the publishing path from a branch, run `gh workflow run build.yml --ref <branch>`: it pushes, signs and checks `test-<sha>` (the list) and `test-<sha>-amd64` / `test-<sha>-arm64` only.
+CI checks the policy the same way a system would: after signing, it runs the image's own `skopeo` with the image's own policy, registries.d and key ([`tests/sigpolicy.sh`](tests/sigpolicy.sh)), once per architecture (`skopeo --override-arch`, so it picks that architecture's image from the list as a system of that architecture would), against the signed list's digest and tag, which must pass, against an unsigned image pushed to `:ci-unsigned` in the same repository, which must be refused for lack of a signature, and against an image from another registry, which must still pass; it also checks that the policy requires the AgentUX key for both repositories. This runs for each variant's repository (`publish (plasma, agentux)`, `publish (hyprland, agentux-hyprland)`). If any of that fails, neither `:latest` nor the dated tag moves: each architecture's image is pushed first under a staging tag (`ci-staging-amd64`, `ci-staging-arm64`), the list under `ci-staging`, and the public tags are copied from the list's digest, unchanged, only after every check passed. To try the publishing path from a branch, run `gh workflow run build.yml --ref <branch>`: it pushes, signs and checks `test-<sha>` (the list) and `test-<sha>-amd64` / `test-<sha>-arm64` only. A `v*` tag (through `release.yml`) does the same with `candidate-<tag>`, and only the approved release job moves `:<tag>` and `:stable` to it.
 
 The required check, `build`, passes when both variants built for both architectures and, outside pull requests, both lists were published; the per-image jobs are `image (plasma, amd64)`, `image (plasma, arm64)`, `image (hyprland, amd64)` and `image (hyprland, arm64)`, and the smoke tests `smoke (<variant>, <arch>)`.
 
 Every job that builds or pulls an image first pulls it with [`.github/scripts/pull.sh`](.github/scripts/pull.sh), which retries up to five times with a growing pause: quay.io's CDN drops a blob download halfway now and then (`writing blob: ... unexpected EOF`), and podman's own few quick retries used to give up and fail the whole build. `podman build` then starts from the local copy of the base image.
 
-The signing key lives in the repository secrets `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`. Rotating it means shipping the new public key in an image signed with the old one first (a `keyPaths` list with both), then switching CI to the new key.
+The signing key lives in the repository secrets `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD` (why it is not behind the release approval: [Signing and approval](#signing-and-approval-what-the-gate-does-and-does-not-do)). Rotating it means shipping the new public key in an image signed with the old one first (a `keyPaths` list with both), then switching CI to the new key.
 
 ## Build and test locally
 
@@ -270,11 +326,11 @@ Locally, `just boot-test` does the same with the image from `just build` (result
 
 ### Live ISO test
 
-The Live ISO workflow boots the amd64 ISO it built (on pull requests that touch `live/`, the live test or the workflow, weekly and on tags) headless in QEMU/KVM with UEFI, from the CD, with an empty disk behind it, and talks to the live system through the QEMU guest agent the live layer ships ([`tests/live-vm.sh`](tests/live-vm.sh), which runs [`tests/live.sh`](tests/live.sh) in the VM as root):
+The Live ISO workflow boots the amd64 ISO it built (on pull requests that touch `live/`, the live test or the workflow, weekly, and for every release) headless in QEMU/KVM with UEFI, from the CD, with an empty disk behind it, and talks to the live system through the QEMU guest agent the live layer ships ([`tests/live-vm.sh`](tests/live-vm.sh), which runs [`tests/live.sh`](tests/live.sh) in the VM as root):
 
 - it waits for the live user's autologin session, then checks that the system booted live (`rd.live.image`, the overlay root), that `kwin_wayland`, `plasmashell` and `agentux-cockpit` run for `liveuser` with the AgentUX look-and-feel, that `agentuxd` runs with `--fake-agents` and `aux ps` answers with the demo's runs (one waiting for approval), and that neither first-login nor the Antigravity ACP server unit is enabled or ran; the installer launchers, the panel pin and Anaconda's payload are checked too but only warn;
 - screenshots: the desktop after login and a minute later, the demo after the test approves its waiting run, and the installer opened through **Install AgentUX**; plus a screendump every 2 seconds of the first two minutes (GRUB and the boot splash, `boot/` in the artifact);
-- then it installs from the live system to the VM's disk with Anaconda and the live installer's own payload (`install.ks`: the registry pull through the signature policy and the `bootc switch`). Anaconda's live mode takes no kickstart (its interactive defaults only preset values; the disk is always picked in the UI), so the test runs it as a plain kickstart install from the live session, with the answers the UI would get. Anaconda halts the live system at the end, so the test then attaches the VM's disk to the host (`qemu-nbd`) and checks the installed deployment there: it tracks `ghcr.io/agentux-os/agentux:latest` from the registry (`ostree-unverified-registry:`, as after a bootc-image-builder install), has the signature policy and the image's own user units, and no live user, live demo or fake-agents override. Then it boots the disk alone and screenshots its first boot. The install depends on the VM reaching ghcr.io, so a failed install only warns; an installed system that differs from a normal install fails the job. The VM gets 12 GB of RAM for it, since the live system runs in RAM.
+- then it installs from the live system to the VM's disk with Anaconda and the live installer's own payload (`install.ks`: the registry pull through the signature policy and the `bootc switch`). Anaconda's live mode takes no kickstart (its interactive defaults only preset values; the disk is always picked in the UI), so the test runs it as a plain kickstart install from the live session, with the answers the UI would get. Anaconda halts the live system at the end, so the test then attaches the VM's disk to the host (`qemu-nbd`) and checks the installed deployment there: it tracks the ISO's channel from the registry (`ghcr.io/agentux-os/agentux:latest`, or `:stable` for a release; `ostree-unverified-registry:`, as after a bootc-image-builder install), has the signature policy and the image's own user units, and no live user, live demo or fake-agents override. Then it boots the disk alone and screenshots its first boot. The install depends on the VM reaching ghcr.io, so a failed install only warns; an installed system that differs from a normal install fails the job. The VM gets 12 GB of RAM for it, since the live system runs in RAM.
 
 `just live-test` does the same locally (`LIVE_TEST_INSTALL=0` skips the install).
 

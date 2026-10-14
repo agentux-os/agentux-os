@@ -20,18 +20,37 @@ on:
         options: [amd64, arm64, both]
         default: amd64
       image:
-        description: Image to build the live ISO from instead of the variant's :latest (e.g. a test-<sha> tag)
+        description: Image to build the live ISO from instead of the variant's :latest (e.g. a test-<sha> tag or a digest)
         default: ""
+      channel:
+        description: Channel the installed system follows (stable falls back to latest while no :stable exists)
+        type: choice
+        options: [latest, stable]
+        default: latest
       install-test:
         description: Also install from the live session to the test VM's disk
         type: boolean
         default: true
       publish:
-        description: Publish the ISO on download.agentuxos.org (iso/builds/ and iso/latest/)
+        description: Publish the ISO on download.agentuxos.org (iso/nightly/; only from main)
         type: boolean
         default: false
-  push:
-    tags: ["v*"]
+  # A v* tag: release.yml calls this with the tag's candidate digest and the
+  # stable channel, and publishes the ISOs itself once the release is approved.
+  workflow_call:
+    inputs:
+      variant:
+        type: string
+        default: plasma
+      arch:
+        type: string
+        default: both
+      image:
+        type: string
+        default: ""
+      channel:
+        type: string
+        default: latest
   schedule:
     - cron: "0 9 * * 1" # weekly, Monday, after the nightly image build
   # Check that the live ISO still builds and boots when its definition changes.
@@ -42,9 +61,14 @@ on:
       - live/**
       - tests/live*
       - tests/qga.py
+      - .github/scripts/channel.sh
 
 env:
+  # What the live system is built from: an explicit image (release.yml passes
+  # the tag's digest), or the variant's :latest.
   IMAGE: ${{ inputs.image || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
+  REPO: ${{ inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland' || 'ghcr.io/agentux-os/agentux' }}
+  CHANNEL: ${{ inputs.channel || 'latest' }}
   # The ISO's file name: agentux-live-<date>-<arch> or agentux-hyprland-live-<date>-<arch>.
   ISO_PREFIX: ${{ inputs.variant == 'hyprland' && 'agentux-hyprland-live' || 'agentux-live' }}
   LIVE_IMAGE: localhost/agentux-live:ci
@@ -61,12 +85,11 @@ jobs:
       - id: matrix
         env:
           ARCH: ${{ inputs.arch || 'amd64' }}
-          EVENT: ${{ github.event_name }}
         run: |
           amd='{"arch":"x86_64","goarch":"amd64","runner":"ubuntu-24.04","packages":"qemu-system-x86 qemu-utils ovmf"}'
           arm='{"arch":"aarch64","goarch":"arm64","runner":"ubuntu-24.04-arm","packages":"qemu-system-arm qemu-utils qemu-efi-aarch64"}'
-          # Tags get both architectures; everything else what was asked for.
-          if [ "$EVENT" = push ] || [ "$ARCH" = both ]; then include="[$amd,$arm]"
+          # Tags (release.yml) ask for both architectures.
+          if [ "$ARCH" = both ]; then include="[$amd,$arm]"
           elif [ "$ARCH" = arm64 ]; then include="[$arm]"
           else include="[$amd]"; fi
           echo "include=$include" >> "$GITHUB_OUTPUT"
@@ -81,10 +104,18 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     permissions:
-      contents: write # the GitHub release, for a tag
+      contents: read
       packages: read
     steps:
       - uses: actions/checkout@v4
+
+      # The channel the installed system follows (TRACK_IMAGE) and what the
+      # live installer pulls (INSTALL_IMAGE): a release ISO installs the
+      # tag's digest and follows :stable (see .github/scripts/channel.sh).
+      - name: Pick the channel
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/channel.sh
 
       # The image, the live layer, the squashfs and the ISO need far more
       # than the ~20 GB a fresh runner has free.
@@ -110,7 +141,9 @@ jobs:
 
       - name: Build the live environment
         run: |
-          sudo podman build --build-arg BASE_IMAGE="$IMAGE" -f live/Containerfile --tag "$LIVE_IMAGE" .
+          sudo podman build --build-arg BASE_IMAGE="$IMAGE" \
+            --build-arg INSTALL_IMAGE="$INSTALL_IMAGE" --build-arg TRACK_IMAGE="$TRACK_IMAGE" \
+            -f live/Containerfile --tag "$LIVE_IMAGE" .
           sudo podman image ls
 
       - name: Build the ISO (Titanoboa)
@@ -131,7 +164,7 @@ jobs:
           sha256sum "$name.iso" > "$name.iso.sha256"
           ls -lh "$name.iso"
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "ISO \`$name.iso\`: $(du -h "$name.iso" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+          echo "ISO \`$name.iso\` ($(du -h "$name.iso" | cut -f1)), installs \`$INSTALL_IMAGE\` and follows \`$TRACK_IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
           # Room for the test VM; the images are not needed anymore.
           sudo podman rmi --all --force >/dev/null || true
           df -h /
@@ -184,6 +217,7 @@ jobs:
         if: steps.kvm.outputs.ok == 'true'
         env:
           LIVE_TEST_INSTALL: ${{ (github.event_name != 'workflow_dispatch' || inputs.install-test) && '1' || '0' }}
+          LIVE_TRACK_IMAGE: ${{ env.TRACK_IMAGE }}
         run: tests/live-vm.sh "${{ steps.iso.outputs.name }}.iso" output/live-test
 
       - name: Summary
@@ -209,13 +243,30 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      # download.agentuxos.org, and the GitHub release for a tag
-      # (.github/scripts/publish-iso.sh): tags, the weekly build and a
-      # dispatch with publish set; never pull requests.
+  # The weekly build and a dispatch with publish set go to iso/nightly/ on
+  # download.agentuxos.org (.github/scripts/publish-iso.sh), only once every
+  # ISO of the run built and the amd64 one passed its test. Its R2
+  # credentials live in the `nightly` environment, which only main can use.
+  # Tags are published by release.yml, after approval.
+  publish:
+    needs: live
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: nightly
+    permissions:
+      contents: read
+      actions: read # the ISO artifacts of this run
+    steps:
+      - uses: actions/checkout@v4
       - uses: sigstore/cosign-installer@v4.1.2
-        if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.publish) }}
-      - name: Publish the ISO
-        if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.publish) }}
+      # This run's ISOs, as their jobs uploaded (and tested) them.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.ISO_PREFIX }}-2*
+          path: ${{ runner.temp }}/isos
+          merge-multiple: true
+      - name: Publish the ISOs
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -223,7 +274,4 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
-          LATEST: ${{ env.ISO_PREFIX }}-${{ matrix.arch }}
-        run: |
-          command -v aws >/dev/null || sudo snap install aws-cli --classic
-          .github/scripts/publish-iso.sh "${{ steps.iso.outputs.name }}" "$LATEST"
+        run: .github/scripts/publish-iso.sh nightly "$RUNNER_TEMP/isos"
