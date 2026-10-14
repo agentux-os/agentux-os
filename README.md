@@ -116,7 +116,7 @@ The live ISO's menu is Titanoboa's: it generates the ISO's `grub.cfg` from the e
 
 ## Try it live
 
-The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download `agentux-live-<date>-x86_64.iso` from the artifacts of a successful run (weekly, on tags, or run the workflow; `hyprland` builds `agentux-hyprland-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test), check it against its `.sha256` and write it to a USB stick as above. It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
+The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download the newest one from **[download.agentuxos.org/iso/latest/agentux-live-x86_64.iso](https://download.agentuxos.org/iso/latest/agentux-live-x86_64.iso)** ([`.sha256`](https://download.agentuxos.org/iso/latest/agentux-live-x86_64.iso.sha256)), or a tagged one from the [releases](https://github.com/agentux-os/agentux-os/releases), check it against its `.sha256` (see [Downloads](#downloads)) and write it to a USB stick as above. Each run also keeps its ISO as an artifact for 14 days (`hyprland` builds `agentux-hyprland-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test). It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
 
 What you get:
 
@@ -136,11 +136,30 @@ How it is built: [`live/Containerfile`](live/Containerfile) starts from the publ
 
 Live mode is visible to scripts as `rd.live.image` on the kernel command line, and `/usr/share/agentux/live/marker` exists only in the live layer. None of it is in the image: an installed system has none of these files.
 
+## Downloads
+
+ISOs are published on **download.agentuxos.org**, a Cloudflare R2 bucket: GitHub limits release files to 2 GiB and every ISO is larger (the installer about 4.7 GB, the live ISO about 3.7 GB). [`.github/scripts/publish-iso.sh`](.github/scripts/publish-iso.sh) uploads them from the ISO workflows, only after the live ISO passed its boot and install test:
+
+| Path | What |
+|---|---|
+| `iso/latest/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest published build |
+| `iso/v<version>/…-v<version>-<arch>.iso` | A tag's build; its [GitHub release](https://github.com/agentux-os/agentux-os/releases) carries the checksums and the links |
+| `iso/builds/…-<date>-<arch>.iso` | Weekly builds, and runs dispatched with **publish** |
+
+Next to every ISO is `<name>.iso.sha256` and `<name>.iso.sha256.sigstore.json`, a cosign signature of the checksum with the key that signs the images:
+
+```sh
+sha256sum --check agentux-live-x86_64.iso.sha256
+cosign verify-blob --key files/etc/pki/containers/agentux-os.pub   --bundle agentux-live-x86_64.iso.sha256.sigstore.json agentux-live-x86_64.iso.sha256
+```
+
+The bucket is written with the repository secrets `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `agentux-downloads` only).
+
 ## Install
 
 ### From the ISO
 
-The [Build ISO](https://github.com/agentux-os/agentux-os/actions/workflows/iso.yml) workflow turns the latest image into an Anaconda installer ISO per architecture with [bootc-image-builder](https://github.com/osbuild/image-builder/tree/main/bootc-image-builder), each built natively: `agentux-<date>-x86_64.iso` for PCs and `agentux-<date>-aarch64.iso` for 64-bit ARM UEFI machines. Download the one for your machine from the artifacts of a successful run, check it against the `.sha256` next to it, and write it to a USB stick:
+The [Build ISO](https://github.com/agentux-os/agentux-os/actions/workflows/iso.yml) workflow turns the latest image into an Anaconda installer ISO per architecture with [bootc-image-builder](https://github.com/osbuild/image-builder/tree/main/bootc-image-builder), each built natively: `agentux-<date>-x86_64.iso` for PCs and `agentux-<date>-aarch64.iso` for 64-bit ARM UEFI machines. Download the one for your machine from **[download.agentuxos.org/iso/latest/](https://download.agentuxos.org/iso/latest/agentux-x86_64.iso)** (`agentux-x86_64.iso` or `agentux-aarch64.iso`) or a [release](https://github.com/agentux-os/agentux-os/releases), check it against the `.sha256` next to it (see [Downloads](#downloads)), and write it to a USB stick:
 
 ```sh
 sha256sum -c agentux-*.iso.sha256
