@@ -1,0 +1,63 @@
+/* AgentUX branding for Cockpit pages on the live ISO, which means the web
+ * installer (anaconda-webui runs in Cockpit). live/build.sh installs this
+ * directory as /usr/share/cockpit/branding/<ID>-<VARIANT_ID>/ (fedora-agentux,
+ * fedora-agentux-hyprland), which Cockpit prefers over branding/fedora/ for
+ * every file it has. The installer loads this file after its own CSS, so
+ * rules with the same selectors win. Colours: the brand's (agentux
+ * brand/README.md); logo.png is the compact mark in Lime, apple-touch-icon.png
+ * and favicon.ico the app icon. */
+
+#badge {
+    inline-size: 225px;
+    block-size: 80px;
+    background-image: url("logo.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+}
+
+#brand::before {
+    content: "${NAME}";
+}
+
+/* Brand palette: Lime on dark, Moss on light (Lime is unreadable on white). */
+.anaconda {
+    --brand-default-light: #c6f36b;
+    --brand-default: #4f7d0b;
+    --brand-default-dark: #3b5e08;
+}
+
+:not(.pf-v6-theme-dark) .anaconda {
+    --pf-t--global--color--brand--default: #4f7d0b;
+    --pf-t--global--color--brand--hover: #3b5e08;
+    --pf-t--global--text--color--link--default: #4f7d0b;
+    --pf-t--global--text--color--link--hover: #3b5e08;
+}
+
+.pf-v6-theme-dark .anaconda {
+    --pf-t--global--color--brand--default: #c6f36b;
+    --pf-t--global--color--brand--hover: #d6f78f;
+    --pf-t--global--text--color--link--default: #c6f36b;
+    --pf-t--global--text--color--link--hover: #d6f78f;
+}
+
+/* The title bar: Ink with a Graphite glow behind the mark, Mist text,
+ * instead of Fedora's blue. */
+.pf-v6-c-page__main-group>.pf-v6-c-page__main-section:first-child {
+    --_text: #e7eaef;
+    background: radial-gradient(circle at 2.5rem, #171b20 32px, #0b0d10 100%);
+}
+
+/* The mark as it is (the installer turns Fedora's logo white), wider than
+ * Fedora's square one. */
+.logo {
+    width: 3.5rem;
+    height: 2rem;
+    background-image: url("logo.png");
+    background-position: center;
+    filter: none;
+    mix-blend-mode: normal;
+}
+
+html:not(.pf-v6-theme-dark) .pf-v6-c-wizard__nav-link.pf-m-current:before {
+    --pf-v6-c-wizard__nav-link--m-current--before--BackgroundColor: #4f7d0b;
+}

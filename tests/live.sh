@@ -163,6 +163,14 @@ phase_checks() {
     else
         warn "installer payload not configured"; indent </usr/share/agentux/live/install.ks
     fi
+    local branding
+    # shellcheck source=/dev/null
+    branding="/usr/share/cockpit/branding/$(. /etc/os-release && echo "$ID-$VARIANT_ID")"
+    if [[ -f $branding/branding.css && -f $branding/logo.png ]] && grep -q '#c6f36b' "$branding/branding.css"; then
+        ok "installer branding: $branding (05-installer.png shows it)"
+    else
+        warn "no AgentUX installer branding in $branding"
+    fi
 
     echo "== failed units"
     local failed

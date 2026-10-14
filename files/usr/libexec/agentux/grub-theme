@@ -1,0 +1,52 @@
+#!/usr/bin/bash
+# Keeps the AgentUX GRUB theme on the boot partition in step with the booted
+# image (agentux-grub-theme.service, at every boot). GRUB reads only the boot
+# partition, which an image cannot ship files into: bootupd writes a static
+# grub.cfg there at install time and leaves it alone afterwards, and that
+# grub.cfg sources $prefix/console.cfg before drawing the menu. So this copies
+# /usr/share/agentux/grub/ to /boot/grub2/agentux/ and its console.cfg to
+# /boot/grub2/console.cfg. Nothing else on /boot is touched: not grub.cfg,
+# not the boot entries, not grubenv, so upgrades and rollbacks work as before
+# (a rollback to an image without this keeps the last theme, harmlessly).
+#
+# console.cfg is the user's file as much as ours: it is (re)written only when
+# there is none, or when it is still exactly what this wrote last time (the
+# copy in agentux/). Edited or replaced by hand, it is left alone for good.
+set -euo pipefail
+
+src=/usr/share/agentux/grub
+grub=/boot/grub2
+
+if [[ ! -f $grub/grub.cfg ]]; then
+    echo "no $grub/grub.cfg; nothing to do"
+    exit 0
+fi
+if ! grep -q 'console\.cfg' "$grub/grub.cfg"; then
+    echo "$grub/grub.cfg does not source console.cfg (not bootupd's static config); nothing to do"
+    exit 0
+fi
+if [[ -e $grub/console.cfg ]] && ! cmp -s "$grub/console.cfg" "$grub/agentux/console.cfg"; then
+    echo "$grub/console.cfg is not the one AgentUX wrote; leaving the GRUB menu as it is"
+    exit 0
+fi
+if cmp -s "$src/console.cfg" "$grub/console.cfg" && diff -r -q "$src" "$grub/agentux" >/dev/null 2>&1; then
+    echo "GRUB theme up to date"
+    exit 0
+fi
+
+# /boot may be mounted read-only (ostree remounts it to write); the unit runs
+# in its own mount namespace, so this remount stays private to it.
+if [[ ! -w $grub ]] && mountpoint -q /boot; then
+    mount -o remount,rw /boot
+fi
+
+rm -rf "$grub/agentux.new"
+cp -r "$src" "$grub/agentux.new"
+sync -f "$grub/agentux.new"
+rm -rf "$grub/agentux"
+mv "$grub/agentux.new" "$grub/agentux"
+cp "$grub/agentux/console.cfg" "$grub/console.cfg.new"
+sync -f "$grub/console.cfg.new"
+mv "$grub/console.cfg.new" "$grub/console.cfg"
+sync -f "$grub"
+echo "GRUB theme installed in $grub/agentux"
