@@ -7,6 +7,10 @@
 #                    wizard's session, first login, agentuxd, an end-to-end
 #                    run with fake agents and one with checks in rootless
 #                    Podman (that one only warns)
+#   boot.sh installed
+#                    a system installed from the installer ISO
+#                    (tests/iso-vm.sh): the booted image, the signature
+#                    policy and the system units only
 #   boot.sh desktop  after an autologin reboot: the Plasma session, the
 #                    cockpit and no Welcome Center (reported, but boot-vm.sh
 #                    does not fail on them)
@@ -20,7 +24,7 @@
 # resolves versions through the GitHub API, which CI runners share).
 set -uo pipefail
 
-phase="${1:?usage: boot.sh system|desktop|sample}"
+phase="${1:?usage: boot.sh system|installed|desktop|sample}"
 fail=0
 ok()   { printf 'ok    %s\n' "$*"; }
 bad()  { printf 'FAIL  %s\n' "$*"; fail=1; }
@@ -91,6 +95,32 @@ check_image() {
     else
         bad "bootc booted '${booted:-nothing}', expected '${EXPECTED_IMAGE:-?}'"
     fi
+    local transport
+    transport="$(jq -r '.status.booted.image.image.transport // empty' <<<"$status")"
+    if [[ "$transport" == registry ]]; then
+        ok "bootc upgrade pulls from the registry"
+    else
+        bad "the booted image's transport is '${transport:-none}', not registry"
+    fi
+}
+
+# What `bootc upgrade` checks: the policy requires the AgentUX key for both
+# repositories, the key is there, and registries.d fetches the signatures.
+check_policy() {
+    echo "== signature policy"
+    local r
+    for r in ghcr.io/agentux-os/agentux ghcr.io/agentux-os/agentux-hyprland; do
+        if jq -e --arg r "$r" '.transports.docker[$r] | length == 1 and .[0].type == "sigstoreSigned"
+                and .[0].keyPath == "/etc/pki/containers/agentux-os.pub"' /etc/containers/policy.json >/dev/null; then
+            ok "policy requires the AgentUX key for $r"
+        else
+            bad "policy does not require the AgentUX key for $r"
+            jq --arg r "$r" '.transports.docker[$r]' /etc/containers/policy.json 2>&1 | indent
+        fi
+    done
+    assert "the AgentUX public key is installed" test -s /etc/pki/containers/agentux-os.pub
+    assert "registries.d fetches sigstore signatures for ghcr.io/agentux-os" \
+        grep -q 'use-sigstore-attachments: true' /etc/containers/registries.d/agentux-os.yaml
 }
 
 # The GRUB menu's AgentUX look: agentux-grub-theme.service ran and put
@@ -796,6 +826,7 @@ check_desktop() {
 case "$phase" in
     system)
         check_image
+        check_policy
         check_os_release
         check_system
         check_splash
@@ -810,6 +841,11 @@ case "$phase" in
         check_agentuxd
         check_fake_run
         check_podman_isolation
+        ;;
+    installed)
+        check_image
+        check_policy
+        check_system
         ;;
     desktop)
         check_desktop

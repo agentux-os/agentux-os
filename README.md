@@ -375,6 +375,17 @@ The Live ISO workflow boots the amd64 ISO it built (on pull requests that touch 
 
 `just live-test` does the same locally (`LIVE_TEST_INSTALL=0` skips the install).
 
+### Installer ISO test
+
+The Build ISO workflow installs the x86_64 installer ISO it built before anything can publish it (pull requests that touch the ISO's definition or this test, the weekly build, and every release), with [`tests/iso-vm.sh`](tests/iso-vm.sh):
+
+- it reads the ISO's own boot entry (`EFI/BOOT/grub.cfg`) and kickstart (`inst.ks=`, with what it `%include`s) and checks the kickstart installs the embedded image (`ostreecontainer`) and switches the installed system to the channel the ISO was built for (`ghcr.io/agentux-os/agentux:latest`, or `:stable` for a release);
+- it makes that kickstart unattended: the ISO's lines stay as they are, minus the UI mode, plus the answers the installer's UI would get (language, time zone, the whole disk), a `boottest` user with a throwaway SSH key and password, sshd enabled, and `poweroff`;
+- it boots the ISO's kernel and initrd under QEMU/KVM with UEFI and the ISO's own command line, with `inst.ks=` pointed at that kickstart on a small second CD (GRUB's menu is interactive, so it is the only part bypassed; stage 2 and the payload come from the ISO), and waits for the install to power the VM off;
+- then it boots the installed disk alone and runs [`tests/boot.sh`](tests/boot.sh)'s `installed` checks over SSH ([`tests/boot-vm.sh`](tests/boot-vm.sh) with `BOOT_TEST_PHASE=installed`): `bootc` booted the channel's image from the registry, the signature policy requires the AgentUX key for both repositories (key and `registries.d` in place), the system reached `running` with no failed units, and the display manager runs.
+
+A failure fails the ISO job, so neither the weekly `publish` job nor a release publishes the ISO. The aarch64 installer ISO is built but not booted (no KVM on GitHub's arm64 runners), which the release notes and `latest.json` (`boot_tested`) say. Locally: `tests/iso-vm.sh agentux-<version>-x86_64.iso ghcr.io/agentux-os/agentux:latest output/iso-test` (needs QEMU with KVM, OVMF and xorriso).
+
 `just qcow2 path/to/config.toml` builds a ready-to-boot disk instead (`just vm qcow2` boots it); the config should add a user with `[[customizations.user]]`. Set `AGENTUX_IMAGE` to build from another image, e.g. `AGENTUX_IMAGE=ghcr.io/agentux-os/agentux:latest just iso` after a `podman pull`.
 
 ## License
