@@ -100,6 +100,7 @@ check_image() {
 check_grub_theme() {
     echo "== GRUB theme"
     local result
+    echo "      /boot is mounted $(findmnt -no OPTIONS /boot 2>&1)"
     result="$(systemctl show -P Result agentux-grub-theme.service 2>&1)"
     if [[ "$result" == success ]] && systemctl is-enabled -q agentux-grub-theme.service; then
         ok "agentux-grub-theme.service: enabled, $result"
