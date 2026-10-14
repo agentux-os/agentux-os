@@ -200,7 +200,7 @@ RUN --mount=type=bind,source=wallpaper,target=/tmp/wallpaper \
         svg="/tmp/wallpaper/wallpaper-${variant%%:*}.svg" \
         && out="$pkg/contents/${variant#*:}" \
         && magick -density 128 "$svg" -alpha off -depth 8 -quality 90 "$out/5120x2880.jxl" \
-        && magick -density 131.5556 "$svg" -alpha off -crop 1440x2960+2300+0 +repage -depth 8 -quality 90 "$out/1440x2960.jxl" \
+        && magick -density 131.5556 "$svg" -alpha off -crop 1440x2960+2810+0 +repage -depth 8 -quality 90 "$out/1440x2960.jxl" \
         && test "$(magick identify -format '%m %wx%h' "$out/5120x2880.jxl")" = "JXL 5120x2880" \
         && test "$(magick identify -format '%m %wx%h' "$out/1440x2960.jxl")" = "JXL 1440x2960" \
         || exit 1; \
@@ -233,7 +233,7 @@ RUN dnf -y install plymouth-plugin-script \
     && DRACUT_NO_XATTR=1 dracut --no-hostonly --kver "$kver" --reproducible --add ostree --force "$img" \
     && lsinitrd "$img" > /tmp/initramfs.txt \
     && grep -q 'usr/share/plymouth/themes/agentux/agentux.script$' /tmp/initramfs.txt \
-    && grep -q 'usr/share/plymouth/themes/agentux/dashes.png$' /tmp/initramfs.txt \
+    && grep -q 'usr/share/plymouth/themes/agentux/wake.png$' /tmp/initramfs.txt \
     && grep -q '/plymouth/script.so$' /tmp/initramfs.txt \
     && rm /tmp/initramfs.txt \
     && chmod 0644 "$img"

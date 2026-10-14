@@ -49,7 +49,7 @@ def write_png(path, w, h, rgb):
 
 
 def is_splash(w, h, rgb):
-    """Mostly Ink, with some Lime (the mark, lit or dimmed) on it."""
+    """Mostly Ink, with some Lime (the mark) on it."""
     ink = lime = total = 0
     step = 4
     for y in range(0, h, step):

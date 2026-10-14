@@ -1,19 +1,19 @@
 # AgentUX boot splash (Plymouth script plugin).
 #
-# The mark sits dimmed in the middle of an Ink screen with the wordmark below
-# it, and short lit dashes run along its four lanes, reach the merge together
-# and leave along the line as one: the wallpaper's "messages on the bus". A
-# Lime hairline under the wordmark shows boot progress; the passphrase prompt
-# (LUKS), messages and the shutdown, reboot and update modes reuse the same
-# layout. Sizes are for a 1080p screen and scale with the screen; the images
-# come at 1x and @2x (see plymouth/build.py in agentux-os, which also checks
-# that FRAMES and COLUMNS below match the sprite sheets).
+# The swimming penguin, the AgentUX mark, sits in the middle of an Ink screen
+# with the wordmark below it, and a band of light runs back along its wake
+# (the water lines and bubbles) as if the water were streaming past. One more
+# water line under the wordmark, a Lime wave filling a Graphite one, shows boot
+# progress; the passphrase prompt (LUKS), messages and the shutdown, reboot and
+# update modes reuse the same layout. Sizes are for a 1080p screen and scale
+# with the screen; the images come at 1x and @2x (see plymouth/build.py in
+# agentux-os, which also checks that FRAMES and COLUMNS below match the sprite
+# sheets).
 
-FRAMES = 45;       # dash frames in dashes.png / dashes@2x.png
-COLUMNS = 9;       # frames per row in those sheets
+FRAMES = 45;       # frames in wake.png / wake@2x.png
+COLUMNS = 5;       # frames per row in those sheets
 TICKS = 2;         # refresh ticks (50 Hz) per frame: 25 fps
-PAUSE = 15;        # frames with no dash between two runs (0.6 s)
-DIM = 0.62;        # the mark's opacity while dashes run on it (the wallpaper's lanes)
+PAUSE = 30;        # frames with the wake at rest between two runs (1.2 s)
 
 Window.SetBackgroundTopColor(0.043, 0.051, 0.063);
 Window.SetBackgroundBottomColor(0.043, 0.051, 0.063);
@@ -42,10 +42,10 @@ fun place(sprite, image, x, y, z) {
 }
 
 mark = Sprite();
-dash = Sprite();
+wake = Sprite();
 wordmark = Sprite();
 mark.SetOpacity(0);
-dash.SetOpacity(0);
+wake.SetOpacity(0);
 wordmark.SetOpacity(0);
 track = Sprite();
 fill = Sprite();
@@ -94,39 +94,39 @@ fun layout() {
 
     mark_image = load("mark");
     wordmark_image = load("wordmark");
-    sheet = Image("dashes" + global.suffix + ".png");
+    sheet = Image("wake" + global.suffix + ".png");
     fw = sheet.GetWidth() / COLUMNS;
     fh = sheet.GetHeight() / Math.Int((FRAMES + COLUMNS - 1) / COLUMNS);
     for (i = 0; i < FRAMES; i++)
         global.frames[i] = scaled(sheet.Crop((i % COLUMNS) * fw, Math.Int(i / COLUMNS) * fh, fw, fh), global.k);
 
-    # The mark and the wordmark, 30 px apart, a little above the middle.
-    gap = 30 * s;
+    # The mark (256 x 90 px at 1080p) and the wordmark, 28 px apart, a little
+    # above the middle.
+    gap = 28 * s;
     group = mark_image.GetHeight() + gap + wordmark_image.GetHeight();
     top = global.Y + global.H * 0.47 - group / 2;
     global.mark_x = cx - mark_image.GetWidth() / 2;
     global.mark_y = top;
     place(global.mark, mark_image, global.mark_x, global.mark_y, 10);
-    global.dash.SetPosition(Math.Int(global.mark_x), Math.Int(global.mark_y), 11);
+    global.wake.SetPosition(Math.Int(global.mark_x), Math.Int(global.mark_y), 11);
     wordmark_bottom = top + mark_image.GetHeight() + gap + wordmark_image.GetHeight();
     place(global.wordmark, wordmark_image, cx - wordmark_image.GetWidth() / 2,
           top + mark_image.GetHeight() + gap, 10);
 
-    # Below the wordmark: the progress hairline, or the status line, or the
-    # passphrase prompt.
-    global.below = wordmark_bottom + 44 * s;
-    global.track_w = Math.Int(112 * s);
-    track_h = Math.Max(Math.Int(2 * s + 0.5), 1);
-    place(global.track, Image("track.png").Scale(global.track_w, track_h),
-          cx - global.track_w / 2, global.below, 10);
-    global.fill_image = Image("fill.png");
-    global.fill_h = track_h;
+    # Below the wordmark: the progress water line (as wide as the wordmark),
+    # or the status line, or the passphrase prompt.
+    global.below = wordmark_bottom + 40 * s;
+    track_image = load("track");
+    global.track_w = track_image.GetWidth();
+    place(global.track, track_image, cx - global.track_w / 2, global.below, 10);
+    global.fill_image = load("fill");
+    global.fill_h = global.fill_image.GetHeight();
     global.fill.SetPosition(Math.Int(cx - global.track_w / 2), Math.Int(global.below), 11);
     if (global.status_text != "") {
         img = slate(global.status_text, 11);
         y = global.below;
         if (global.show_progress)
-            y = global.below + 18 * s;
+            y = global.below + track_image.GetHeight() + 16 * s;
         place(global.status, img, cx - img.GetWidth() / 2, y, 10);
     }
 
@@ -143,7 +143,9 @@ fun redraw_progress() {
     global.track.SetOpacity(on);
     w = Math.Int(global.track_w * Math.Clamp(global.progress, 0, 1));
     if (on && w > 0) {
-        global.fill.SetImage(global.fill_image.Scale(w, global.fill_h));
+        # The Lime wave cut to the progress, not squeezed: the water line
+        # fills from the left.
+        global.fill.SetImage(global.fill_image.Crop(0, 0, w, global.fill_h));
         global.fill.SetOpacity(1);
     } else {
         global.fill.SetOpacity(0);
@@ -213,20 +215,19 @@ fun refresh() {
     # The mark and the wordmark fade in over the first half second.
     fade = Math.Clamp(global.tick / 25, 0, 1);
     global.wordmark.SetOpacity(fade);
+    global.mark.SetOpacity(fade);
     if (global.state != "normal") {
-        # Waiting for the user: the mark lit and still.
-        global.mark.SetOpacity(1);
-        global.dash.SetOpacity(0);
+        # Waiting for the user: the mark still, the wake at rest.
+        global.wake.SetOpacity(0);
         global.capslock.SetOpacity(Plymouth.GetCapslockState());
         return;
     }
-    global.mark.SetOpacity(DIM * fade);
     f = Math.Int(global.tick / TICKS) % (FRAMES + PAUSE);
     if (f < FRAMES) {
-        global.dash.SetImage(global.frames[f]);
-        global.dash.SetOpacity(fade);
+        global.wake.SetImage(global.frames[f]);
+        global.wake.SetOpacity(fade);
     } else {
-        global.dash.SetOpacity(0);
+        global.wake.SetOpacity(0);
     }
 }
 
