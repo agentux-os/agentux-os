@@ -13,16 +13,27 @@
 #   release  a v* tag, from release.yml once the owner approved it: each ISO
 #            goes to iso/<tag>/ under its own name, and its copy replaces the
 #            one in iso/stable/ (agentux-live-x86_64.iso); then the GitHub
-#            release is created with the checksums and the links. EXPECT
-#            lists the ISO names (without .iso) the release must have.
+#            release is created with the checksums and the links, and
+#            latest.json moves to the release. EXPECT lists the ISO names
+#            (without .iso) the release must have; PLASMA_DIGEST and
+#            HYPRLAND_DIGEST (optional) are the promoted images' digests,
+#            for latest.json.
 #
 # Layout of the bucket:
 #   iso/stable/<prefix>-<arch>.iso        the newest release
 #   iso/<tag>/<prefix>-<tag>-<arch>.iso   every release, kept
 #   iso/nightly/<prefix>-<arch>.iso       the newest weekly or dispatched build
-# each with .iso.sha256 (naming the file next to it, so `sha256sum --check`
-# works on either copy) and .iso.sha256.sigstore.json (a cosign bundle, signed
-# with the AgentUX key that also signs the images).
+#   latest.json                           the newest release, for the website
+# each ISO with .iso.sha256 (naming the file next to it, so `sha256sum
+# --check` works on either copy) and .iso.sha256.sigstore.json (a cosign
+# bundle, signed with the AgentUX key that also signs the images). Every
+# directory also has SHA256SUMS, all its ISOs' checksums in one file, and
+# SHA256SUMS.sigstore.json; latest.json has latest.json.sigstore.json.
+#
+# SHA256SUMS is rebuilt from the .sha256 files in the bucket after every
+# upload, not from this run's ISOs: the ISOs of one channel come from
+# separate jobs and workflows (iso.yml, live.yml), and each of them leaves a
+# complete file behind.
 #
 # GitHub release assets are limited to 2 GiB, which every ISO exceeds, so a
 # release carries the checksums, their signatures and the download links.
@@ -145,6 +156,40 @@ for iso in "${isos[@]}"; do
     published+=("$name")
 done
 
+# ---- SHA256SUMS ----------------------------------------------------------------
+
+# sums DIR: rebuilds DIR/SHA256SUMS from the .iso.sha256 files in DIR, signs
+# it and uploads both.
+sums() {
+    local d=$1 work f
+    work=$(mktemp -d)
+    s3 ls "s3://$bucket/$d/" | awk '{print $4}' | grep '\.iso\.sha256$' | sort >"$work/list" || true
+    if [[ ! -s $work/list ]]; then
+        echo "::error::no checksums in $d/"
+        return 1
+    fi
+    : >"$work/SHA256SUMS"
+    while read -r f; do
+        s3 cp "s3://$bucket/$d/$f" "$work/$f"
+        # One line, "<sha256>  <file>.iso", naming a file in this directory.
+        if ! grep -Eq '^[0-9a-f]{64}  [^/ ]+\.iso$' "$work/$f" || [[ $(wc -l <"$work/$f") != 1 ]]; then
+            echo "::error::$d/$f is not a single sha256sum line"
+            return 1
+        fi
+        cat "$work/$f" >>"$work/SHA256SUMS"
+    done <"$work/list"
+    sign "$work/SHA256SUMS"
+    s3 cp "$work/SHA256SUMS" "s3://$bucket/$d/SHA256SUMS" --content-type text/plain --cache-control "$short"
+    s3 cp "$work/SHA256SUMS.sigstore.json" "s3://$bucket/$d/SHA256SUMS.sigstore.json" \
+        --content-type application/json --cache-control "$short"
+    echo "$d/SHA256SUMS: $(wc -l <"$work/SHA256SUMS") ISOs"
+    echo "- [\`$d/SHA256SUMS\`]($base/$d/SHA256SUMS)" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
+    [[ $d == "$versioned" ]] && cp "$work/SHA256SUMS" "$work/SHA256SUMS.sigstore.json" "$dir/"
+    rm -rf "$work"
+}
+if [[ -n $versioned ]]; then sums "$versioned"; fi
+sums "$channel"
+
 [[ $mode == release ]] || exit 0
 
 # ---- the GitHub release ------------------------------------------------------
@@ -184,7 +229,49 @@ This release's images are \`ghcr.io/agentux-os/agentux:$tag\` and \`ghcr.io/agen
 EOF
 gh release view "$tag" >/dev/null 2>&1 \
     || gh release create "$tag" "${pre[@]}" --verify-tag --title "AgentUX $tag" --notes-file "$notes"
-assets=()
+assets=(SHA256SUMS SHA256SUMS.sigstore.json)
 for name in "${published[@]}"; do assets+=("$name.iso.sha256" "$name.iso.sha256.sigstore.json"); done
 gh release upload "$tag" --clobber "${assets[@]}"
-echo "release: $(gh release view "$tag" --json url --jq .url)" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+release_url=$(gh release view "$tag" --json url --jq .url)
+echo "release: $release_url" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+# ---- latest.json -----------------------------------------------------------------
+
+# The website's download buttons read https://download.agentuxos.org/latest.json.
+# Written last, once everything it links to is in place.
+isos_json=$(
+    for name in "${published[@]}"; do
+        arch=${name##*-}
+        kind=installer; [[ $name == *-live-* ]] && kind=live
+        variant=plasma; [[ $name == agentux-hyprland-* ]] && variant=hyprland
+        alias=${name%-"$tag"-"$arch"}-$arch
+        jq -n --arg name "$name.iso" --arg url "$base/$versioned/$name.iso" \
+            --arg stable_url "$base/$channel/$alias.iso" \
+            --argjson size "$(stat -c %s "$name.iso")" \
+            --arg sha256 "$(cut -d' ' -f1 "$name.iso.sha256")" \
+            --arg arch "$arch" --arg kind "$kind" --arg variant "$variant" \
+            --argjson tested "$([[ $arch == x86_64 && $kind == live ]] && echo true || echo false)" \
+            '{name: $name, url: $url, stable_url: $stable_url, size: $size, sha256: $sha256,
+              arch: $arch, kind: $kind, variant: $variant, channel: "stable", boot_tested: $tested}'
+    done | jq -s 'sort_by(.kind != "live", .arch != "x86_64")'
+)
+jq -n --arg version "$tag" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg release "$release_url" --arg sums "$base/$versioned/SHA256SUMS" \
+    --arg key "https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub" \
+    --arg plasma "${PLASMA_DIGEST:-}" --arg hyprland "${HYPRLAND_DIGEST:-}" \
+    --argjson isos "$isos_json" \
+    '{version: $version, date: $date, channel: "stable", release_notes: $release,
+      sha256sums: $sums, sha256sums_signature: ($sums + ".sigstore.json"), public_key: $key,
+      images: {
+        plasma: ({ref: ("ghcr.io/agentux-os/agentux:" + $version), channel: "ghcr.io/agentux-os/agentux:stable"}
+                 + (if $plasma != "" then {digest: $plasma} else {} end)),
+        hyprland: ({ref: ("ghcr.io/agentux-os/agentux-hyprland:" + $version), channel: "ghcr.io/agentux-os/agentux-hyprland:stable"}
+                   + (if $hyprland != "" then {digest: $hyprland} else {} end))
+      },
+      isos: $isos}' >latest.json
+cat latest.json
+sign latest.json
+s3 cp latest.json "s3://$bucket/latest.json" --content-type application/json --cache-control "$short"
+s3 cp latest.json.sigstore.json "s3://$bucket/latest.json.sigstore.json" \
+    --content-type application/json --cache-control "$short"
+echo "- [\`latest.json\`]($base/latest.json) now names $tag" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
