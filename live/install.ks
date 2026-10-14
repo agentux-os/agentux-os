@@ -20,6 +20,19 @@ ostreecontainer --url=@INSTALL_IMAGE@ --transport=registry
 %post --erroronfail
 set -e
 bootc switch --mutate-in-place --transport registry @TRACK_IMAGE@
+# Anaconda writes the root file system into /etc/fstab (btrfs, with
+# subvol=root and its mount options). On a bootc system / is a composefs
+# overlay that the initramfs mounts from the kernel command line (root=,
+# rootflags=), so systemd-remount-fs fails at every boot trying to apply
+# those options to it ("overlay: No changes allowed in reconfigure") and the
+# system starts degraded. bootc's own installer writes no such line; this
+# comments it out. The other entries (/boot, /boot/efi) stay.
+if [ -f /etc/fstab ]; then
+    awk '$2 == "/" && $1 !~ /^#/ {print "# " $0 "    # disabled by the AgentUX installer: ostree mounts /"; next} {print}' \
+        /etc/fstab >/etc/fstab.agentux
+    cat /etc/fstab.agentux >/etc/fstab
+    rm -f /etc/fstab.agentux
+fi
 if [ -c /dev/ttyS0 ]; then
     echo "AgentUX install finished" >/dev/ttyS0 || true
 fi

@@ -9,6 +9,10 @@
 #       Boot DISK (a qcow2 built with that config) on a copy-on-write overlay,
 #       check it booted IMAGE, screenshot the login screen, then reboot into
 #       Plasma with autologin for the desktop checks. Logs, screenshots and summary.md go to DIR.
+#       BOOT_TEST_PHASE picks tests/boot.sh's checks: `system` (the default,
+#       everything) or `installed` (the deployment, its policy and the
+#       units only; the installer ISO test, tests/iso-vm.sh, uses it);
+#       BOOT_TEST_DESKTOP=0 skips the desktop checks.
 #       Screendumps of the first ~45 s of the first boot and of the reboot go
 #       to DIR/splash/boot and DIR/splash/reboot, with a (best effort) check
 #       that they show the AgentUX boot splash (tests/splash.py).
@@ -114,15 +118,18 @@ run() {
     # SSH connections; otherwise each disconnect stops it.
     vm "sudo loginctl enable-linger $user"
     vm 'cat >/var/tmp/boot.sh && chmod +x /var/tmp/boot.sh' <"$here/boot.sh"
-    # first-login is running by now, and the Antigravity ACP server's unit
-    # waits for it; sample their memory in the background (the system checks
-    # report it). $HOME is the VM user's, expanded there.
-    # shellcheck disable=SC2016
-    vm 'systemd-run --user --quiet --unit=boot-test-memory /var/tmp/boot.sh sample agentux-first-login.service "$HOME/.local/state/agentux/first-login.done"' </dev/null \
-        || echo "::warning::could not start the first-login memory sampler"
-    # shellcheck disable=SC2016
-    vm 'systemd-run --user --quiet --unit=boot-test-memory-acp /var/tmp/boot.sh sample agentux-antigravity-acp.service "$HOME/.local/state/agentux/antigravity-acp.done"' </dev/null \
-        || echo "::warning::could not start the Antigravity ACP server memory sampler"
+    local phase="${BOOT_TEST_PHASE:-system}"
+    if [[ "$phase" == system ]]; then
+        # first-login is running by now, and the Antigravity ACP server's unit
+        # waits for it; sample their memory in the background (the system checks
+        # report it). $HOME is the VM user's, expanded there.
+        # shellcheck disable=SC2016
+        vm 'systemd-run --user --quiet --unit=boot-test-memory /var/tmp/boot.sh sample agentux-first-login.service "$HOME/.local/state/agentux/first-login.done"' </dev/null \
+            || echo "::warning::could not start the first-login memory sampler"
+        # shellcheck disable=SC2016
+        vm 'systemd-run --user --quiet --unit=boot-test-memory-acp /var/tmp/boot.sh sample agentux-antigravity-acp.service "$HOME/.local/state/agentux/antigravity-acp.done"' </dev/null \
+            || echo "::warning::could not start the Antigravity ACP server memory sampler"
+    fi
 
     # The first boot screen: the greeter, or plasma-setup's first-boot wizard.
     vm 'timeout 300 bash -c "until systemctl is-active -q display-manager.service; do sleep 5; done"' || true
@@ -137,7 +144,7 @@ run() {
     echo "::group::system checks"
     set +e
     { printf '%s\n' "${GITHUB_TOKEN:-}"; } \
-        | vm "read -r GITHUB_TOKEN; export GITHUB_TOKEN; EXPECTED_IMAGE='$image' EXPECTED_AUX_VERSION='$aux_version' /var/tmp/boot.sh system" \
+        | vm "read -r GITHUB_TOKEN; export GITHUB_TOKEN; EXPECTED_IMAGE='$image' EXPECTED_AUX_VERSION='$aux_version' /var/tmp/boot.sh $phase" \
         | tee "$dir/boot-system.log"
     system_rc=${PIPESTATUS[1]}
     set -e

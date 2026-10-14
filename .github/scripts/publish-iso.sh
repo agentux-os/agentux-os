@@ -211,7 +211,7 @@ ISOs are hosted on download.agentuxos.org (GitHub limits release files to 2 GiB)
 | **Live ISO**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-live-$tag-x86_64") | $(link "agentux-live-$tag-aarch64") |
 | **Installer ISO**: offline install | $(link "agentux-$tag-x86_64") | $(link "agentux-$tag-aarch64") |
 
-The x86_64 live ISO was booted in a VM and installed from its live session before this release was published, and the installed system checked. The installer ISOs and the aarch64 live ISO are built natively but not boot-tested (GitHub's arm64 runners have no KVM).
+Both x86_64 ISOs were booted and installed in a VM before this release was published, and the installed systems checked: the live ISO from its live session, the installer ISO unattended. The aarch64 ISOs are built natively but not boot-tested: GitHub's arm64 runners have no KVM.
 
 The newest release's ISOs are always at \`$base/iso/stable/\` (\`agentux-live-x86_64.iso\`, \`agentux-x86_64.iso\`, and the \`aarch64\` ones).
 
@@ -250,7 +250,7 @@ isos_json=$(
             --argjson size "$(stat -c %s "$name.iso")" \
             --arg sha256 "$(cut -d' ' -f1 "$name.iso.sha256")" \
             --arg arch "$arch" --arg kind "$kind" --arg variant "$variant" \
-            --argjson tested "$([[ $arch == x86_64 && $kind == live ]] && echo true || echo false)" \
+            --argjson tested "$([[ $arch == x86_64 ]] && echo true || echo false)" \
             '{name: $name, url: $url, stable_url: $stable_url, size: $size, sha256: $sha256,
               arch: $arch, kind: $kind, variant: $variant, channel: "stable", boot_tested: $tested}'
     done | jq -s 'sort_by(.kind != "live", .arch != "x86_64")'

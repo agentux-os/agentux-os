@@ -314,6 +314,14 @@ phase_verify() {
     else
         bad "live agentuxd override in the installed system"
     fi
+    # No root entry in fstab: systemd-remount-fs would fail on the composefs
+    # root at every boot (install.ks comments it out).
+    if [[ -f "$deploy/etc/fstab" ]] && ! awk '$2 == "/" && $1 !~ /^#/ {found = 1} END {exit !found}' "$deploy/etc/fstab"; then
+        ok "no root entry in /etc/fstab (ostree mounts /)"
+    else
+        bad "/etc/fstab mounts / (systemd-remount-fs would fail)"
+        indent <"$deploy/etc/fstab" 2>/dev/null
+    fi
     if jq -e '.transports.docker["ghcr.io/agentux-os/agentux"][0].type == "sigstoreSigned"' "$deploy/etc/containers/policy.json" >/dev/null 2>&1; then
         ok "signature policy requires the AgentUX key"
     else

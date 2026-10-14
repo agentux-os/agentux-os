@@ -42,6 +42,9 @@ on:
       - .github/scripts/pull.sh
       - .github/scripts/channel.sh
       - disk_config/iso.toml
+      - tests/iso-vm.sh
+      - tests/boot-vm.sh
+      - tests/boot.sh
 
 env:
   # What the ISO is built from: an explicit image (release.yml passes the
@@ -70,7 +73,7 @@ jobs:
             goarch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 210
     permissions:
       contents: read
       packages: read
@@ -177,6 +180,72 @@ jobs:
           compression-level: 0
           retention-days: 14
           if-no-files-found: error
+
+      # The x86_64 ISO is installed unattended in QEMU/KVM and the installed
+      # system checked (tests/iso-vm.sh); a failure fails the job, so nothing
+      # publishes it. GitHub's arm64 runners have no KVM: the aarch64 ISO is
+      # built, not booted.
+      - name: Enable KVM
+        id: kvm
+        if: steps.arch.outputs.ok == 'true'
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            if [ "${{ matrix.goarch }}" = amd64 ]; then
+              echo "::error::no /dev/kvm on this runner"
+              exit 1
+            fi
+            echo "::notice::no /dev/kvm on the ${{ matrix.arch }} runner; the installer ISO is built but not booted"
+            echo "Installer test (${{ matrix.arch }}) skipped: the runner has no KVM." >> "$GITHUB_STEP_SUMMARY"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          for _ in $(seq 10); do test -w /dev/kvm && break; sleep 1; done
+          test -w /dev/kvm || sudo chmod 0666 /dev/kvm
+          test -w /dev/kvm
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install QEMU, UEFI firmware and xorriso
+        if: steps.kvm.outputs.ok == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils ovmf xorriso
+          # Room for the VM's disk; the images are not needed anymore.
+          sudo podman rmi --all --force >/dev/null || true
+          sudo rm -rf output
+          df -h /
+
+      - name: Install from the ISO and test the installed system
+        if: steps.kvm.outputs.ok == 'true'
+        run: tests/iso-vm.sh "${{ steps.iso.outputs.name }}.iso" "$TRACK_IMAGE" iso-test
+
+      - name: Test summary
+        if: always() && steps.kvm.outputs.ok == 'true'
+        run: |
+          if [[ -f iso-test/summary.md ]]; then
+            cat iso-test/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The installer test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.kvm.outputs.ok == 'true'
+        with:
+          name: iso-test-${{ matrix.arch }}-${{ github.run_id }}
+          path: |
+            iso-test/install/*.log
+            iso-test/install/*.cfg
+            iso-test/install/iso*.ks
+            iso-test/boot/*.png
+            iso-test/boot/*.log
+            iso-test/boot/*.txt
+            iso-test/summary.md
+          retention-days: 14
+          if-no-files-found: warn
 
   # The weekly build and a dispatch with publish set go to iso/nightly/ on
   # download.agentuxos.org (.github/scripts/publish-iso.sh). Its R2
