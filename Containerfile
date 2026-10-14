@@ -236,7 +236,7 @@ RUN dnf -y install plymouth-plugin-script \
     && DRACUT_NO_XATTR=1 dracut --no-hostonly --kver "$kver" --reproducible --add ostree --force "$img" \
     && lsinitrd "$img" > /tmp/initramfs.txt \
     && grep -q 'usr/share/plymouth/themes/agentux/agentux.script$' /tmp/initramfs.txt \
-    && grep -q 'usr/share/plymouth/themes/agentux/wake.png$' /tmp/initramfs.txt \
+    && grep -q 'usr/share/plymouth/themes/agentux/water.png$' /tmp/initramfs.txt \
     && grep -q '/plymouth/script.so$' /tmp/initramfs.txt \
     && rm /tmp/initramfs.txt \
     && chmod 0644 "$img"
