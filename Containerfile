@@ -14,7 +14,7 @@ ARG VARIANT=plasma
 RUN case "$VARIANT" in plasma|hyprland) ;; *) echo "VARIANT must be plasma or hyprland, not '$VARIANT'" >&2; exit 1 ;; esac
 
 # mise is not in the Fedora repos; use its official RPM repository.
-RUN curl -fsSL https://mise.jdx.dev/rpm/mise.repo -o /etc/yum.repos.d/mise.repo
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://mise.jdx.dev/rpm/mise.repo -o /etc/yum.repos.d/mise.repo
 
 # System toolchain. Fast-moving, per-user tools (agent CLIs, bun, lazygit,
 # ast-grep) are installed on first login instead; see files/usr/libexec.
@@ -57,7 +57,7 @@ RUN arch="$(uname -m)" \
         "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
         "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
     && dnf clean all \
-    && curl -fsSL "$desktop/${plasma#/tmp/}" -o "$plasma" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/${plasma#/tmp/}" -o "$plasma" \
     && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "$plasma" > "$plasma.sha256" \
     && sha256sum --check --strict "$plasma.sha256" \
     && tar -xzf "$plasma" -C / --no-same-owner --no-overwrite-dir \
@@ -82,7 +82,7 @@ RUN --mount=type=bind,source=variants,target=/tmp/variants \
     if [ "$VARIANT" != hyprland ]; then exit 0; fi \
     && copr=/etc/yum.repos.d/_copr_sdegler-hyprland.repo \
     && fedora="$(rpm -E %fedora)" \
-    && curl -fsSL "https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/repo/fedora-$fedora/sdegler-hyprland-fedora-$fedora.repo" -o "$copr" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/repo/fedora-$fedora/sdegler-hyprland-fedora-$fedora.repo" -o "$copr" \
     && dnf -y install --setopt=install_weak_deps=False \
         brightnessctl \
         cliphist \
