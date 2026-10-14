@@ -93,6 +93,34 @@ check_image() {
     fi
 }
 
+# The GRUB menu's AgentUX look: agentux-grub-theme.service ran and put
+# console.cfg and the theme next to bootupd's grub.cfg on the boot partition,
+# identical to the image's. Whether GRUB drew it is for boot-vm.sh's
+# screendumps of the reboot.
+check_grub_theme() {
+    echo "== GRUB theme"
+    local result
+    result="$(systemctl show -P Result agentux-grub-theme.service 2>&1)"
+    if [[ "$result" == success ]] && systemctl is-enabled -q agentux-grub-theme.service; then
+        ok "agentux-grub-theme.service: enabled, $result"
+    else
+        bad "agentux-grub-theme.service: '$result', $(systemctl is-enabled agentux-grub-theme.service 2>&1)"
+        journalctl -b -u agentux-grub-theme.service --no-pager 2>&1 | tail -n 20 | indent
+    fi
+    if sudo grep -q 'console\.cfg' /boot/grub2/grub.cfg; then
+        ok "/boot/grub2/grub.cfg sources console.cfg"
+    else
+        bad "/boot/grub2/grub.cfg does not source console.cfg"
+    fi
+    if sudo cmp -s /usr/share/agentux/grub/console.cfg /boot/grub2/console.cfg \
+        && sudo diff -r -q /usr/share/agentux/grub /boot/grub2/agentux >/dev/null; then
+        ok "/boot/grub2/console.cfg and agentux/ match the image  [$(sudo ls /boot/grub2/agentux | tr '\n' ' ')]"
+    else
+        bad "/boot/grub2/console.cfg or agentux/ differ from the image"
+        sudo ls -la /boot/grub2 /boot/grub2/agentux 2>&1 | indent
+    fi
+}
+
 # The AgentUX boot splash: selected, in the initramfs the system booted with
 # (built into the image, /usr/lib/modules/$kver/initramfs.img), and asked for
 # on the kernel command line (rhgb, from the image's bootc kargs.d). Whether
@@ -764,6 +792,7 @@ case "$phase" in
         check_os_release
         check_system
         check_splash
+        check_grub_theme
         check_first_login
         check_antigravity_acp
         check_system_users

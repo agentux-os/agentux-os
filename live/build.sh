@@ -171,6 +171,18 @@ test -n "$fedora"
 rm -f /etc/system-release
 echo "$title release $fedora" >/etc/system-release
 
+# The web installer's look: anaconda-webui runs in Cockpit and takes its logo
+# and brand colours from Cockpit's branding (Fedora's blue title bar and
+# logo otherwise). Cockpit looks in branding/<ID>-<VARIANT_ID>/ before
+# branding/<ID>/, so this adds AgentUX's (live/cockpit-branding: the mark,
+# Ink, Lime and Moss) without touching Fedora's files. The name in the title
+# bar is os-release's PRETTY_NAME, already AgentUX's.
+branding="/usr/share/cockpit/branding/$ID-$VARIANT_ID"
+test -d /usr/share/cockpit/branding/fedora
+mkdir -p "$branding"
+cp -v "$src"/cockpit-branding/* "$branding/"
+test -f "$branding/branding.css" && test -f "$branding/logo.png"
+
 # An Anaconda profile for AgentUX: Kinoite's (Btrfs, the ostree defaults),
 # picked by os-release's ID and VARIANT_ID.
 mkdir -p /etc/anaconda/profile.d

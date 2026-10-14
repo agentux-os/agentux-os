@@ -238,6 +238,22 @@ RUN dnf -y install plymouth-plugin-script \
     && rm /tmp/initramfs.txt \
     && chmod 0644 "$img"
 
+# GRUB menu: the AgentUX look (files/usr/share/agentux/grub/, background from
+# grub/build.py). GRUB reads only the boot partition, which an image cannot
+# ship files into, and bootupd's static grub.cfg there is written once at
+# install time; it does source $prefix/console.cfg, "GRUB console settings
+# provided by the user/platform", before drawing the menu. So
+# agentux-grub-theme.service copies console.cfg and the theme there at boot,
+# never touching grub.cfg, the boot entries or grubenv (see
+# /usr/libexec/agentux/grub-theme). Fail the build if bootupd's static
+# config stops sourcing console.cfg. The font is GRUB's Unifont.
+RUN chmod 0755 /usr/libexec/agentux/grub-theme \
+    && grep -q 'console\.cfg' /usr/lib/bootupd/grub2-static/grub-static-pre.cfg \
+    && cp /usr/share/grub/unicode.pf2 /usr/share/agentux/grub/unicode.pf2 \
+    && test -f /usr/share/agentux/grub/theme.txt \
+    && test -f /usr/share/agentux/grub/background.png \
+    && systemctl enable agentux-grub-theme.service
+
 # Updates of this image (bootc upgrade/switch pull through containers/image)
 # must carry a cosign signature from the AgentUX key shipped in files/. Only
 # AgentUX's repositories get the requirement, both variants' in both images,

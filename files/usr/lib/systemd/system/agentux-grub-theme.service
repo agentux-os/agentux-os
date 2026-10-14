@@ -1,0 +1,15 @@
+[Unit]
+Description=AgentUX look for the GRUB menu
+Documentation=https://github.com/agentux-os/agentux-os#grub-menu
+# Live media boot their own GRUB from the ISO.
+ConditionKernelCommandLine=!rd.live.image
+RequiresMountsFor=/boot
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/agentux/grub-theme
+PrivateMounts=yes
+
+[Install]
+WantedBy=multi-user.target

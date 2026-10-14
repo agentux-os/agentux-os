@@ -1,0 +1,53 @@
+# AgentUX GRUB theme: the Ink screen of the boot splash with the swimming
+# penguin under the menu; entries in Slate, the selected one in Lime. The
+# background comes from grub/build.py in agentux-os; the font is GRUB's own
+# Unifont (/usr/share/grub/unicode.pf2), the only one GRUB ships.
+title-text: ""
+desktop-image: "background.png"
+desktop-image-scale-method: "crop"
+desktop-color: "#0b0d10"
+terminal-font: "Unifont Regular 16"
+message-font: "Unifont Regular 16"
+message-color: "#949dab"
+message-bg-color: "#0b0d10"
+
++ boot_menu {
+    left = 30%
+    top = 24%
+    width = 40%
+    height = 34%
+    item_font = "Unifont Regular 16"
+    item_color = "#949dab"
+    selected_item_font = "Unifont Regular 16"
+    selected_item_color = "#c6f36b"
+    item_height = 24
+    item_padding = 0
+    item_spacing = 12
+    icon_width = 0
+    icon_height = 0
+    item_icon_space = 0
+    scrollbar = false
+}
+
++ label {
+    id = "__timeout__"
+    left = 0
+    top = 88%
+    width = 100%
+    height = 20
+    align = "center"
+    font = "Unifont Regular 16"
+    color = "#949dab"
+    text = "Booting in %d s"
+}
+
++ label {
+    left = 0
+    top = 92%
+    width = 100%
+    height = 20
+    align = "center"
+    font = "Unifont Regular 16"
+    color = "#5a6370"
+    text = "Up and Down to choose, Enter to boot, e to edit, c for a command line"
+}
