@@ -50,7 +50,7 @@ Both are multi-arch, signed and checked the same way, and either can `bootc swit
 
 ## Default wallpaper
 
-plasma-setup's first-boot wizard does not follow the AgentUX theme: a Fedora patch hard-codes its background to `/usr/share/wallpapers/Default/contents/images_dark/` (`images/` with a light theme), `5120x2880.jxl` on a landscape screen and `1440x2960.jxl` on a portrait one. In Fedora, `Default` (and `Fedora`, which points at it) is a symlink owned by `desktop-backgrounds-kde` to the current release's wallpaper package (`F44`). The image points `Default` at `/usr/share/wallpapers/AgentUX-Default/` instead, a wallpaper package with exactly those four files, rendered during the build with ImageMagick (from the base image, built with librsvg and libjxl) from the brand's key art in [`wallpaper/`](wallpaper) (`brand/art/wallpaper-{dark,light}.svg` in [agentux](https://github.com/agentux-os/agentux/tree/main/brand)); the portrait one is a crop around the penguin. So the wizard, and anything else that falls back to `Default`, shows AgentUX's art; `F44` itself is untouched and still selectable. The desktop, lock and login screens keep using the `AgentUX` package from agentux-desktop. The build fails if any of the four files is not a JPEG XL of its size or `Default` stops resolving to them, and the smoke test checks the links again.
+plasma-setup's first-boot wizard does not follow the AgentUX theme: a Fedora patch hard-codes its background to `/usr/share/wallpapers/Default/contents/images_dark/` (`images/` with a light theme), `5120x2880.jxl` on a landscape screen and `1440x2960.jxl` on a portrait one. In Fedora, `Default` (and `Fedora`, which points at it) is a symlink owned by `desktop-backgrounds-kde` to the current release's wallpaper package (`F44`). The image points `Default` at `/usr/share/wallpapers/AgentUX-Default/` instead, a wallpaper package with exactly those four files, rendered during the build with ImageMagick (from the base image, built with librsvg and libjxl) from [`wallpaper/wizard-{dark,light}.svg`](wallpaper): the brand's key art (`wallpaper-{dark,light}.svg` next to them, copies of `brand/art/` in [agentux](https://github.com/agentux-os/agentux/tree/main/brand)) with the penguin moved by [`wallpaper/build.py`](wallpaper/build.py) to the lower third, centred and a fifth of the screen wide, so the wizard's centred "Welcome to Plasma Desktop" and **Begin Setup** stand on plain water; the portrait one is the middle of it. So the wizard, and anything else that falls back to `Default`, shows AgentUX's art; `F44` itself is untouched and still selectable. The desktop, lock and login screens keep using the `AgentUX` package from agentux-desktop. The build fails if any of the four files is not a JPEG XL of its size or `Default` stops resolving to them, and the smoke test checks the links again.
 
 Since the symlink belongs to `desktop-backgrounds-kde`, `rpm -V desktop-backgrounds-kde` reports `....L....  /usr/share/wallpapers/Default`; that is expected.
 
@@ -82,15 +82,13 @@ The AgentUX components are installed from their GitHub releases, pinned in one p
 
 ## Boot splash
 
-![The boot splash on a 1080p screen: the AgentUX penguin in Lime on Ink, the wordmark below it, a thin wavy progress line](docs/plymouth/boot-1080p.png)
+![The boot splash in the boot test's VM (1280 × 800): the AgentUX penguin in Lime on Ink, the wordmark below it, a thin wavy progress line](docs/plymouth/boot.png)
 
 The boot splash is the brand's swimming penguin on Ink: a band of light runs back along its wake (the water lines and bubbles, drawn at 42 % as in the mark), from the penguin's back to the end of the water, as if the water were streaming past. One more water line under the wordmark, a Lime wave filling a Graphite one, is Plymouth's boot progress. Shutdown and reboot show the same screen with "Shutting down" or "Restarting" instead, and offline updates a progress line with a "don't turn off" note.
 
 ![One loop of the animation](docs/plymouth/animation.gif)
 
-If the disk is encrypted, the passphrase prompt (LUKS, from the initramfs) takes the progress line's place, the wake comes to rest while it waits, and "Caps Lock is on" shows under the field when it is:
-
-![The passphrase prompt: systemd's prompt text, a dark rounded field with one Lime dot per typed character](docs/plymouth/unlock-1080p.png)
+If the disk is encrypted, the passphrase prompt (LUKS, from the initramfs) takes the progress line's place, the wake comes to rest while it waits, and "Caps Lock is on" shows under the field when it is: systemd's prompt text above a dark rounded field with one Lime dot per typed character.
 
 How it is built:
 
@@ -99,7 +97,7 @@ How it is built:
 - The `Containerfile` selects the theme (`plymouth-set-default-theme agentux`) and rebuilds the kernel's initramfs, `/usr/lib/modules/$kver/initramfs.img`, which is the one bootc boots: `dracut --no-hostonly --reproducible --add ostree`, as Universal Blue images do. The build fails if the theme or the script plugin is not in it.
 - Plymouth shows a splash only when the kernel command line asks for one. Kinoite's image sets no kernel arguments (installers used to add `rhgb quiet`), so [`/usr/lib/bootc/kargs.d/10-agentux-splash.toml`](files/usr/lib/bootc/kargs.d/10-agentux-splash.toml) adds `rhgb quiet`; bootc applies it on install and on the next upgrade. To see boot messages instead, press Esc during boot, or remove them with `sudo rpm-ostree kargs --delete=rhgb --delete=quiet`.
 
-To see it without installing: `python3 plymouth/preview.py` renders the animation from the theme's images (the GIF above), and [`plymouth/preview-vm.sh`](plymouth/preview-vm.sh) builds the `Containerfile`'s splash step on the base image and boots that kernel and initramfs in QEMU (software emulation in a container, no KVM, a few minutes) twice, once plain and once with a LUKS disk and a few keys typed into the prompt, saving a screenshot every half second to `output/plymouth-preview/`. The screenshots above come from it.
+To see it without installing: `python3 plymouth/preview.py` renders the animation from the theme's images (the GIF above), and [`plymouth/preview-vm.sh`](plymouth/preview-vm.sh) builds the `Containerfile`'s splash step on the base image and boots that kernel and initramfs in QEMU (software emulation in a container, no KVM, a few minutes) twice, once plain and once with a LUKS disk and a few keys typed into the prompt, saving a screenshot every half second to `output/plymouth-preview/`. The screenshot above is a frame of the boot test (tests/boot-vm.sh), which saves the splash's frames in its artifact.
 
 ## GRUB menu
 
@@ -111,6 +109,8 @@ A bootc image cannot ship files into GRUB's reach: GRUB reads only the boot part
 - [`agentux-grub-theme.service`](files/usr/lib/systemd/system/agentux-grub-theme.service) runs [`/usr/libexec/agentux/grub-theme`](files/usr/libexec/agentux/grub-theme) at every boot, which copies that directory to `/boot/grub2/agentux/` and its `console.cfg` to `/boot/grub2/console.cfg` when they differ from the booted image's (so theme changes arrive with `bootc upgrade`). It never touches `grub.cfg`, the boot entries or `grubenv`, so updates and rollbacks work as before; a rollback to an older image keeps the last theme, which is harmless;
 - `console.cfg` is yours as much as AgentUX's: the service writes it only when there is none or when it is still exactly what it wrote last time. Edit or delete it (and `/boot/grub2/agentux/`) to get GRUB's plain menu back, or put console settings of your own in it, and the service leaves it alone. If the graphics or a file fail to load, GRUB keeps its text menu;
 - the build fails if bootupd's static config stops sourcing `console.cfg`, and the boot test checks that the service ran and the files on `/boot` match the image.
+
+bootc mounts `/boot` read-only, so the image also turns off GRUB's boot-success flag: `grub-boot-success.timer` (a user unit that runs `grub2-set-bootflag boot_success` two minutes into a session, for `grub2-mkconfig`'s hidden-menu feature) is disabled and its service masked for all users. bootupd's static `grub.cfg` always shows the menu and never reads the flag, and writing it could only fail with "Read-only file system". The live layer disables it too.
 
 The live ISO's menu is Titanoboa's: it generates the ISO's `grub.cfg` from the entries in `iso.yaml` with no way to add a theme or source another file, so it stays GRUB's text menu (with AgentUX's entry names).
 
