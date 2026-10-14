@@ -70,7 +70,7 @@ The build fails if the defaults stop parsing (`Hyprland --verify-config`, `foot 
 
 ### AgentUX versions
 
-The AgentUX components are installed from their GitHub releases, pinned in one place, the `ARG`s at the top of the AgentUX section of the [`Containerfile`](Containerfile). The image currently ships agentux-core 0.4.2 and agentux-desktop 0.4.2.
+The AgentUX components are installed from their GitHub releases, pinned in one place, the `ARG`s at the top of the AgentUX section of the [`Containerfile`](Containerfile). The image currently ships agentux-core 0.4.2 and agentux-desktop 0.4.3.
 
 | Pin | What it selects |
 |---|---|
