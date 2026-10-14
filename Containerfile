@@ -39,8 +39,8 @@ RUN dnf -y install \
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the Plasma overlay checksum.
 ARG AGENTUX_CORE_VERSION=0.4.2
-ARG AGENTUX_DESKTOP_VERSION=0.4.1
-ARG AGENTUX_PLASMA_SHA256=5a2d2544cbfa22d689e58a7d27a0a88a68d65be75c00d2d0b18d320ea4618516
+ARG AGENTUX_DESKTOP_VERSION=0.4.2
+ARG AGENTUX_PLASMA_SHA256=de399f2ecf3641921dc8459fff27270ebf7acc18686dc98bafc46d656bd2e20a
 
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
 # cockpit, and the Plasma 6 defaults overlay (usr/ and etc/, relative to /),
