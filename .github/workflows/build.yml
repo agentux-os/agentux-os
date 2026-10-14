@@ -160,7 +160,13 @@ jobs:
           # digests, and so their signatures, stay valid inside the list.
           docker buildx imagetools create --tag "${IMAGE}:${tag}" \
             "${IMAGE}@${amd64}" "${IMAGE}@${arm64}"
-          skopeo inspect --raw "docker://${IMAGE}:${tag}" > "$RUNNER_TEMP/list.json"
+          # ghcr.io can answer "manifest unknown" for a moment right after
+          # the push (seen on the first v* tag); retry the read.
+          for i in 1 2 3 4 5 6; do
+            skopeo inspect --raw "docker://${IMAGE}:${tag}" > "$RUNNER_TEMP/list.json" && break
+            [ "$i" = 6 ] && exit 1
+            sleep $((i * 5))
+          done
           digest="sha256:$(sha256sum "$RUNNER_TEMP/list.json" | cut -d' ' -f1)"
           raw="$(cat "$RUNNER_TEMP/list.json")"
           jq . <<<"$raw"
@@ -249,7 +255,12 @@ jobs:
         run: |
           for tag in "$(date -u +%Y%m%d)" latest; do
             skopeo copy --quiet --all --preserve-digests "docker://${IMAGE}@${DIGEST}" "docker://${IMAGE}:${tag}"
-            test "$(skopeo inspect --raw "docker://${IMAGE}:${tag}" | sha256sum | cut -d' ' -f1)" = "${DIGEST#sha256:}"
+            # The new tag can read as unknown for a moment after the copy.
+            for i in 1 2 3 4 5 6; do
+              got="$(skopeo inspect --raw "docker://${IMAGE}:${tag}" | sha256sum | cut -d' ' -f1)" && [ "$got" = "${DIGEST#sha256:}" ] && break
+              [ "$i" = 6 ] && { echo "::error::${IMAGE}:${tag} does not resolve to ${DIGEST}"; exit 1; }
+              sleep $((i * 5))
+            done
             echo "${IMAGE}:${tag} -> ${DIGEST}"
           done
 

@@ -38,7 +38,12 @@ for d in "$digest" "${images[@]}"; do verify "$repo@$d"; done
 
 for tag in "$@"; do
     skopeo copy --quiet --all --preserve-digests "docker://$repo@$digest" "docker://$repo:$tag"
-    got="sha256:$(skopeo inspect --raw "docker://$repo:$tag" | sha256sum | cut -d' ' -f1)"
+    # ghcr.io can answer "manifest unknown" for a moment after the copy.
+    for i in 1 2 3 4 5 6; do
+        got="sha256:$(skopeo inspect --raw "docker://$repo:$tag" | sha256sum | cut -d' ' -f1)"
+        [[ $got == "$digest" ]] && break
+        sleep $((i * 5))
+    done
     if [[ $got != "$digest" ]]; then
         echo "::error::$repo:$tag resolves to $got, not $digest"
         exit 1
