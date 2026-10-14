@@ -271,6 +271,7 @@ guest_cmd 120 'journalctl --no-pager -b' >"$dir/journal-live.log" 2>&1 || true
 if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     echo "::group::install from the live system"
     set +e
+    install_start=$SECONDS
     guest install 300 | tee "$dir/install.log"
     install_rc=${PIPESTATUS[0]}
     if [[ "$install_rc" == 0 ]]; then
@@ -285,9 +286,18 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
             if [[ "$out" == *Traceback* || "$out" == *qga:* ]]; then gone=$(( gone + 1 )); else gone=0; fi
             sleep 30
         done
+        # Timed from the host: the live system may be gone by now.
+        echo "metric  install time: $(( SECONDS - install_start ))s" | tee -a "$dir/install.log"
         screenshot 05b-after-install
-        guest install-result 120 | tee -a "$dir/install.log" \
-            || echo "      the guest agent is gone: Anaconda halted the live system at the end, as kickstart installs do" | tee -a "$dir/install.log"
+        if ! guest install-result 120 >"$dir/install-result.log" 2>&1; then
+            # A guest that halted, or a FAIL line: keep only the guest's FAIL lines.
+            grep -q '^FAIL ' "$dir/install-result.log" \
+                || echo "      the guest agent is gone: Anaconda halted the live system at the end, as kickstart installs do" >>"$dir/install-result.log"
+        fi
+        if grep -q '^FAIL\|^ok\|^      ' "$dir/install-result.log"; then
+            grep -v '^Traceback\|^  File \|^    [^ ]\|^[A-Za-z.]*Error:' "$dir/install-result.log" | tee -a "$dir/install.log"
+        fi
+        rm -f "$dir/install-result.log"
         guest_cmd 60 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1
         guest_cmd 60 'cat /tmp/storage.log /tmp/dbus.log 2>/dev/null' >"$dir/anaconda-storage.log" 2>&1
     fi
@@ -312,11 +322,16 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
     set -e
     echo "::endgroup::"
-    if grep -q '^FAIL no ostree deployment' "$dir/install-verify.log"; then
+    if [[ "$install_rc" != 0 ]] || grep -q '^FAIL no ostree deployment' "$dir/install-verify.log"; then
         echo "::warning::installing from the live system failed; see install.log and anaconda.log"
+        echo "FAIL no AgentUX deployment on the disk after the install" >>"$dir/install.log"
         summary_phase "Install from the live system (best effort)" 1 "$dir/install.log"
     else
-        summary_phase "Install from the live system" 0 "$dir/install.log"
+        # The disk decides: an install that left a deployment finished,
+        # whatever the guest could still report.
+        sed -i '/^FAIL anaconda failed (exit none)/d' "$dir/install.log"
+        echo "ok   AgentUX deployment on the disk" >>"$dir/install.log"
+        summary_phase "Install from the live system" "$(grep -q '^FAIL ' "$dir/install.log" && echo 1 || echo 0)" "$dir/install.log"
         summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
         (( verify_rc == 0 )) || system_rc=1
 

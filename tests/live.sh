@@ -235,14 +235,20 @@ phase_install_done() {
 }
 
 phase_install_result() {
-    local rc start
+    local rc
     rc="$(cat /run/agentux-install-test/rc 2>/dev/null || echo "none")"
-    start="$(cat /run/agentux-install-test/start 2>/dev/null || date +%s)"
-    echo "metric  install time: $(( $(date +%s) - start ))s"
     echo "metric  RAM after the install: $(free -m | awk '/^Mem:/ {print $3 " MiB of " $2 " MiB"}')"
     if journalctl -k --no-pager | grep -qi 'out of memory'; then
         echo "      the kernel killed processes for lack of memory:"
         journalctl -k --no-pager | grep -i 'out of memory\|killed process' | tail -n 10 | indent
+    fi
+    # Anaconda halts the system at the end of a kickstart install (the
+    # default), often before its unit can write the result: then the
+    # installed disk, checked from the host, decides.
+    if [[ "$rc" == none ]]; then
+        echo "      no exit status: Anaconda is halting the live system after the install; the installed disk decides"
+        tail -n 40 /run/agentux-install-test/anaconda.out 2>/dev/null | indent
+        return
     fi
     # Anaconda can exit 0 without installing; the disk tells.
     if [[ "$rc" == 0 ]] && ! lsblk -lnpo FSTYPE "$target" | grep -qE 'btrfs|xfs|ext4'; then
