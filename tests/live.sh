@@ -13,7 +13,8 @@
 #             system, unattended, with the live installer's own payload
 #             (/usr/share/agentux/live/install.ks)
 #   verify    look at the installed system on /dev/vda: its deployment tracks
-#             the published image and carries nothing from the live system
+#             the channel (LIVE_TRACK_IMAGE) and carries nothing from the live
+#             system
 #
 # Prints "ok ...", "FAIL ...", "warn ..." lines (and "metric  name: value") for
 # the summary; exits non-zero if a check failed.
@@ -159,7 +160,7 @@ phase_checks() {
     if command -v liveinst >/dev/null && command -v anaconda >/dev/null; then ok "liveinst and anaconda installed"; else warn "liveinst or anaconda missing"; fi
     if grep -q '^%include /usr/share/agentux/live/install.ks' /usr/share/anaconda/interactive-defaults.ks \
         && grep -q "^ostreecontainer --url=$(cat /usr/share/agentux/live/install-image) --transport=registry$" /usr/share/agentux/live/install.ks; then
-        ok "installer payload: $(cat /usr/share/agentux/live/install-image) from the registry"
+        ok "installer payload: $(cat /usr/share/agentux/live/install-image) from the registry, then following $(cat /usr/share/agentux/live/track-image)"
     else
         warn "installer payload not configured"; indent </usr/share/agentux/live/install.ks
     fi
@@ -290,7 +291,7 @@ phase_verify() {
     local origin deploy image
     origin="$(find "$mnt" -maxdepth 7 -path '*/ostree/deploy/*/deploy/*.origin' -print -quit)"
     deploy="${origin%.origin}"
-    image="${LIVE_INSTALL_IMAGE:-$(cat /usr/share/agentux/live/install-image 2>/dev/null)}"
+    image="${LIVE_TRACK_IMAGE:-$(cat /usr/share/agentux/live/track-image 2>/dev/null)}"
     echo "      deployment: ${deploy#"$mnt"}"
     indent <"$origin"
     if grep -qx "container-image-reference=ostree-unverified-registry:$image" "$origin"; then

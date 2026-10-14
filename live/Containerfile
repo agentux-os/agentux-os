@@ -14,9 +14,17 @@
 #   sudo podman build -f live/Containerfile -t localhost/agentux-live .
 #
 # BASE_IMAGE: the AgentUX image to make live (either variant).
+# TRACK_IMAGE: the channel an installed system follows for updates
+#   (ghcr.io/agentux-os/<image>:stable or :latest; default :latest).
+# INSTALL_IMAGE: what "Install AgentUX" pulls from the registry; default
+#   TRACK_IMAGE. A release ISO pins it to the tag's digest
+#   (ghcr.io/agentux-os/<image>@sha256:...), so it installs exactly what was
+#   tested and released, and the system then follows TRACK_IMAGE.
 
 ARG BASE_IMAGE=ghcr.io/agentux-os/agentux:latest
 FROM ${BASE_IMAGE}
+ARG TRACK_IMAGE=""
+ARG INSTALL_IMAGE=""
 
 RUN --mount=type=bind,source=live,target=/tmp/live \
     /tmp/live/build.sh

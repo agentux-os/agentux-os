@@ -16,7 +16,9 @@
 #   - a demo: agentuxd with --fake-agents and a sample project whose runs
 #     the cockpit shows moving, explained by a note on the desktop;
 #   - the installer: Anaconda (liveinst), started by "Install AgentUX", which
-#     installs the signed ghcr.io/agentux-os/<image>:latest from the registry;
+#     installs the signed image from the registry (INSTALL_IMAGE: the
+#     channel's tag, or a release's digest) and leaves the system following
+#     TRACK_IMAGE (ghcr.io/agentux-os/<image>:stable or :latest);
 #   - qemu-guest-agent, so VMs (and the live test) can talk to the session.
 #
 # Live mode is detectable at run time: rd.live.image on the kernel command
@@ -33,8 +35,15 @@ case "${IMAGE_ID:-}" in
     *) echo "not an AgentUX image (IMAGE_ID=${IMAGE_ID:-unset})" >&2; exit 1 ;;
 esac
 # What "Install AgentUX" installs: the published, signed image of the same
-# variant, which the installed system then tracks for updates.
-install_image="ghcr.io/agentux-os/${IMAGE_ID}:latest"
+# variant (INSTALL_IMAGE, a tag or a digest), and the channel the installed
+# system then tracks for updates (TRACK_IMAGE). Both come from live.yml as
+# build arguments; both must be this variant's repository.
+track_image="${TRACK_IMAGE:-ghcr.io/agentux-os/${IMAGE_ID}:latest}"
+install_image="${INSTALL_IMAGE:-$track_image}"
+[[ "$track_image" =~ ^ghcr\.io/agentux-os/${IMAGE_ID}:[a-z0-9._-]+$ ]] \
+    || { echo "TRACK_IMAGE $track_image is not a tag of ghcr.io/agentux-os/${IMAGE_ID}" >&2; exit 1; }
+[[ "$install_image" =~ ^ghcr\.io/agentux-os/${IMAGE_ID}(:[a-z0-9._-]+|@sha256:[0-9a-f]{64})$ ]] \
+    || { echo "INSTALL_IMAGE $install_image is not ghcr.io/agentux-os/${IMAGE_ID}" >&2; exit 1; }
 arch="$(uname -m)"
 
 # /root links to /var/roothome, which an image does not ship; some
@@ -129,6 +138,7 @@ cp -a "$src/files/." /
 chmod 0755 /usr/libexec/agentux/live-*
 install -D -m 0644 "$src/livesys-session-extra" /var/lib/livesys/livesys-session-extra
 printf '%s\n' "$install_image" >/usr/share/agentux/live/install-image
+printf '%s\n' "$track_image" >/usr/share/agentux/live/track-image
 : >/usr/share/agentux/live/marker
 
 sed -i 's/^livesys_session=.*/livesys_session=kde/' /etc/sysconfig/livesys
@@ -200,7 +210,8 @@ EOF
 # What the installer installs (live/install.ks): the signed image from the
 # registry, verified against the image's own signature policy, with the
 # deployment tracking it like any other install.
-sed "s|@INSTALL_IMAGE@|$install_image|g" "$src/install.ks" >/usr/share/agentux/live/install.ks
+sed -e "s|@INSTALL_IMAGE@|$install_image|g" -e "s|@TRACK_IMAGE@|$track_image|g" \
+    "$src/install.ks" >/usr/share/agentux/live/install.ks
 if grep -q '@' /usr/share/agentux/live/install.ks; then exit 1; fi
 test -f /usr/share/anaconda/interactive-defaults.ks
 cat >>/usr/share/anaconda/interactive-defaults.ks <<'EOF'

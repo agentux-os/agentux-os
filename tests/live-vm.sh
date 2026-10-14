@@ -16,8 +16,8 @@
 #    "Install AgentUX" (best effort).
 # 3. With LIVE_TEST_INSTALL=1 (the default): install to the VM's disk with
 #    Anaconda from the live system, unattended but with the live installer's
-#    own payload, check the installed deployment (it tracks the published
-#    image, nothing live-only in it), then boot the disk alone and screenshot
+#    own payload, check the installed deployment (it tracks the channel the
+#    ISO was built for, LIVE_TRACK_IMAGE, and nothing live-only is in it), then boot the disk alone and screenshot
 #    its first boot. The install needs the VM to reach ghcr.io; if it fails,
 #    the job only warns, but a wrong installed system fails it.
 #
@@ -314,10 +314,14 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     sleep 3
     sudo partprobe /dev/nbd0 2>/dev/null
     lsblk -f /dev/nbd0
-    # The image the live installer installs: the ISO's variant.
-    install_image=ghcr.io/agentux-os/agentux:latest
-    [[ "$(basename "$iso")" == *hyprland* ]] && install_image=ghcr.io/agentux-os/agentux-hyprland:latest
-    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_INSTALL_IMAGE="$install_image" bash "$here/live.sh" | tee "$dir/install-verify.log"
+    # The channel the installed system must follow: LIVE_TRACK_IMAGE (what
+    # live.yml built the ISO with), or the ISO's variant's :latest.
+    track_image="${LIVE_TRACK_IMAGE:-}"
+    if [[ -z "$track_image" ]]; then
+        track_image=ghcr.io/agentux-os/agentux:latest
+        [[ "$(basename "$iso")" == *hyprland* ]] && track_image=ghcr.io/agentux-os/agentux-hyprland:latest
+    fi
+    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TRACK_IMAGE="$track_image" bash "$here/live.sh" | tee "$dir/install-verify.log"
     verify_rc=${PIPESTATUS[0]}
     sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
     set -e

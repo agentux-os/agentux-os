@@ -4,7 +4,14 @@
 # it finds. A kickstart that sets only the UI mode makes the install
 # interactive instead: the user picks the disk, language, time zone and
 # creates their account. bootc-image-builder adds the `ostreecontainer`
-# command that installs the AgentUX image.
+# command that installs the AgentUX image (embedded in the ISO, so the
+# install works offline) and a %post `bootc switch` that makes the installed
+# system follow the image reference it was given. That reference is the
+# channel: iso.yml tags the image it builds from as
+# ghcr.io/agentux-os/agentux:stable for a release (the tag's digest) or
+# leaves it :latest for a nightly build, and passes that name (see
+# .github/scripts/channel.sh). This file has no setting for it: bootc-image-
+# builder takes the target only from the image name.
 [customizations.installer.kickstart]
 contents = """
 graphical
