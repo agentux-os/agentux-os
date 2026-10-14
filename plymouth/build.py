@@ -5,20 +5,24 @@ files/usr/share/plymouth/themes/agentux/ (agentux.script draws them).
     cd plymouth && npm install && python3 build.py [--brand ../../agentux/brand]
 
 Needs Node.js (for @resvg/resvg-js, the renderer the brand assets use) and
-Pillow. The mark's geometry is the brand's (agentux brand/src/build.py); the
+Pillow. The mark is the brand's swimming penguin, drawn from its traced
+geometry (brand/src/penguin.svg in the agentux repository, the same parts and
+the same wake opacity and gradient as brand/src/build.py's mark); the
 wordmark is the brand's svg/wordmark-mist.svg. Each image comes at 1x (for
 1080p) and @2x (for 4K); agentux.script scales whichever is closer to the
 screen. Edit this script, not the PNGs.
 
-The animation is the wallpaper's motif, "messages on the bus": the mark sits
-dimmed, and a short lit dash runs along each lane. The four start one after
-the other (the outer lanes are longer) so that they reach the merge at the
-same moment and leave along the line as one.
+The animation is the mark's own movement: the penguin swims and a band of
+light runs back along its wake (the water lines and bubbles, drawn at 42 %),
+from the penguin's back to the tail of the water, as if the water were
+streaming past. The progress indicator is one more water line, a Lime wave
+filling a Graphite one.
 """
 import argparse
 import io
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,116 +37,121 @@ MIST = "#e7eaef"
 SLATE = "#949dab"
 GRAPHITE = "#171b20"
 
-# The mark, in its 64-unit box (brand/svg/mark-lime.svg).
-LANES_Y = [13.0, 25.667, 38.333, 51.0]
-LANE_W, TRUNK_W = 5.0, 6.0
-MERGE = (38.0, 32.0)
-TRUNK = (36.0, 56.0)  # the line starts under the lanes' ends
-# The part of the box the mark covers, caps included, and its size at 1x:
-# 2.4 px per unit, so the mark is 132 x 106 px on a 1080p screen.
-VIEW = (5.0, 10.0, 55.0, 44.0)
-PX_PER_UNIT = 2.4
+# The mark, as the brand draws it (brand/src/build.py): the wake at WAKE
+# opacity, and a gradient (x RAMP, art units) carrying the middle water line
+# into the penguin's back; WING keeps the wing out of that gradient.
+WAKE = 0.42
+RAMP = (560.0, 700.0)
+WING = (560.0, 380.0, 960.0, 544.0)
+# Its size at 1x: 256 px wide on a 1080p screen (brand: png/mark-lime-256.png),
+# about 90 px high.
+MARK_W = 256
 
-# Animation: FRAMES frames at FPS (agentux.script plays them, then shows
-# none for its pause), a lit dash DASH units long.
+# Animation: FRAMES frames at FPS (agentux.script plays them, then shows none
+# for its pause). A band of light BAND art units wide, at most LIT opaque on
+# top of the wake, runs from the penguin's back (START) to past the end of the
+# water (END).
 FPS = 25
 FRAMES = 45
-DASH = 11.0
-COLUMNS = 9
+COLUMNS = 5
+BAND = 220.0
+LIT = 0.8
+START, END = 760.0, -160.0
+
+# Progress: a water line PROGRESS_W x PROGRESS_H px at 1x, PERIODS waves,
+# STROKE px thick.
+PROGRESS_W, PROGRESS_H = 136, 8
+PERIODS = 3
+STROKE = 2.0
+
+# Wordmark: WORDMARK_W px wide at 1x, its own aspect ratio.
+WORDMARK_W = 136
 
 
-def lane(y):
-    return [(8.0, y), (24.5, y), (21.5, 32.0), MERGE]
+def load_penguin(brand):
+    text = (brand / "src/penguin.svg").read_text(encoding="utf-8")
+    parts = {}
+    for m in re.finditer(r'<path id="([^"]+)" data-box="([^"]+)" d="([^"]+)"/>', text):
+        parts[m.group(1)] = (m.group(3), tuple(float(v) for v in m.group(2).split()))
+    for key in ("body", "belly", "flipper", "eye", "water-1", "water-2"):
+        if key not in parts:
+            sys.exit(f"penguin.svg has no part {key!r}; update build.py")
+    return parts
 
 
-def bezier(p, t):
-    u = 1 - t
-    return tuple(u**3 * a + 3 * u * u * t * b + 3 * u * t * t * c + t**3 * d
-                 for a, b, c, d in zip(*p))
+class Mark:
+    def __init__(self, parts):
+        self.parts = parts
+        self.wake = [k for k in parts if k.startswith(("water-", "bubble-"))]
+        boxes = [b for _, b in parts.values()]
+        self.box = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                    max(b[2] for b in boxes), max(b[3] for b in boxes))
 
+    def d(self, *keys):
+        return "".join(f'<path d="{self.parts[k][0]}"/>' for k in keys)
 
-def split(p, t0, t1):
-    """The part of cubic p between t0 and t1, as a cubic."""
-    def at(q, t):
-        a = [tuple(x + (y - x) * t for x, y in zip(q[i], q[i + 1])) for i in range(3)]
-        b = [tuple(x + (y - x) * t for x, y in zip(a[i], a[i + 1])) for i in range(2)]
-        c = tuple(x + (y - x) * t for x, y in zip(b[0], b[1]))
-        return [q[0], a[0], b[0], c], [c, b[1], a[2], q[3]]
-    _, right = at(p, t0)
-    if t1 >= 1:
-        return right
-    left, _ = at(right, (t1 - t0) / (1 - t0))
-    return left
+    def size(self, width):
+        bw, bh = self.box[2] - self.box[0], self.box[3] - self.box[1]
+        return width, round(width * bh / bw)
 
+    def svg(self, body, width):
+        w, h = self.size(width)
+        x0, y0, x1, y1 = self.box
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
+                f'viewBox="{x0:g} {y0:g} {x1 - x0:g} {y1 - y0:g}">{body}</svg>')
 
-class Arc:
-    """Arc-length parametrisation of a cubic."""
-    def __init__(self, p, n=4000):
-        self.p = p
-        self.ts = [i / n for i in range(n + 1)]
-        pts = [bezier(p, t) for t in self.ts]
-        self.s = [0.0]
-        for a, b in zip(pts, pts[1:]):
-            self.s.append(self.s[-1] + math.dist(a, b))
-        self.length = self.s[-1]
+    def _ramp(self, uid, inverse=False):
+        """The brand's mask: the body from the gradient on, and the wing.
+        Inverted: the part of the body that belongs to the wake."""
+        x0, x1 = RAMP
+        wx0, wy0, wx1, wy1 = WING
+        a, b = ("1", "0") if inverse else ("0", "1")
+        wing = "#000" if inverse else "#fff"
+        return (f'<linearGradient id="{uid}g" gradientUnits="userSpaceOnUse" x1="{x0:g}" y1="0" x2="{x1:g}" y2="0">'
+                f'<stop offset="0" stop-color="#fff" stop-opacity="{a}"/>'
+                f'<stop offset="1" stop-color="#fff" stop-opacity="{b}"/></linearGradient>'
+                f'<mask id="{uid}k" maskUnits="userSpaceOnUse" x="0" y="0" width="1300" height="1300">'
+                f'<rect width="1300" height="1300" fill="url(#{uid}g)"/>'
+                f'<rect x="{wx0:g}" y="{wy0:g}" width="{wx1 - wx0:g}" height="{wy1 - wy0:g}" fill="{wing}"/></mask>')
 
-    def t(self, s):
-        s = min(max(s, 0.0), self.length)
-        lo, hi = 0, len(self.s) - 1
-        while hi - lo > 1:
-            mid = (lo + hi) // 2
-            lo, hi = (mid, hi) if self.s[mid] <= s else (lo, mid)
-        span = self.s[hi] - self.s[lo] or 1
-        return self.ts[lo] + (self.ts[hi] - self.ts[lo]) * (s - self.s[lo]) / span
+    def full(self, color=LIME):
+        """The mark: brand/src/build.py's mark_paths()."""
+        return (f'<defs>{self._ramp("m")}</defs><g fill="{color}">'
+                f'<g fill-opacity="{WAKE:g}">{self.d(*self.wake, "body")}</g>'
+                f'<g mask="url(#mk)">{self.d("body")}</g>'
+                f'{self.d("belly", "flipper", "eye")}</g>')
 
-
-def cubic_d(p):
-    (a, b), (c, d), (e, f), (g, h) = p
-    return f"M{a:.3f} {b:.3f}C{c:.3f} {d:.3f} {e:.3f} {f:.3f} {g:.3f} {h:.3f}"
-
-
-def svg(body, w, h, view=VIEW):
-    x, y, vw, vh = view
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-            f'viewBox="{x} {y} {vw} {vh}"><g fill="none" stroke-linecap="round">{body}</g></svg>')
-
-
-def mark_body(color=LIME):
-    lanes = " ".join(f"M8 {y:.3f}C24.50 {y:.3f} 21.50 32 38 32" for y in LANES_Y)
-    return (f'<path stroke="{color}" stroke-width="{LANE_W}" d="{lanes}"/>'
-            f'<path stroke="{color}" stroke-width="{TRUNK_W}" d="M{TRUNK[0]} 32H{TRUNK[1]}"/>')
+    def lit(self, centre, color=LIME):
+        """The wake lit by a soft band of light centred at x = centre."""
+        x0, x1 = centre - BAND / 2, centre + BAND / 2
+        stops = "".join(f'<stop offset="{o:g}" stop-color="#fff" stop-opacity="{a:.3f}"/>'
+                        for o, a in ((0, 0), (0.3, 0.75), (0.5, 1), (0.7, 0.75), (1, 0)))
+        return (f'<defs>{self._ramp("w", inverse=True)}'
+                f'<linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="{x0:.2f}" y1="0" x2="{x1:.2f}" y2="0">{stops}</linearGradient>'
+                f'<mask id="bk" maskUnits="userSpaceOnUse" x="0" y="0" width="1300" height="1300">'
+                f'<rect width="1300" height="1300" fill="url(#bg)"/></mask></defs>'
+                f'<g fill="{color}" fill-opacity="{LIT:g}" mask="url(#bk)">'
+                f'{self.d(*self.wake)}<g mask="url(#wk)">{self.d("body")}</g></g>')
 
 
 def ease(u):
-    # Slower at both ends, never stopping: the dashes ease in and settle out.
+    # Slower at both ends, never stopping: the light eases in and settles out.
     return u - 0.5 / (2 * math.pi) * math.sin(2 * math.pi * u)
 
 
-def dash_body(frame):
-    """The lit parts of the mark in one frame."""
-    arcs = [Arc(lane(y)) for y in LANES_Y]
-    longest = max(a.length for a in arcs)
-    trunk_len = TRUNK[1] - MERGE[0]
-    # Head position along lane + line: the longest lane's dash enters at the
-    # start, every dash reaches the merge at the same time, and the merged
-    # one has left the line by the last frame.
-    speed = longest + trunk_len + DASH
-    tau = ease(frame / (FRAMES - 1))
-    parts = []
-    for arc in arcs:
-        head = arc.length + speed * tau - longest
-        a, b = max(head - DASH, 0.0), min(head, arc.length)
-        if b > a + 1e-3:
-            parts.append(f'<path stroke="{LIME}" stroke-width="{LANE_W}" '
-                         f'd="{cubic_d(split(arc.p, arc.t(a), arc.t(b)))}"/>')
-    # All four are on the line together, so one dash stands for them.
-    head = speed * tau - longest
-    a, b = max(head - DASH, 0.0), min(head, trunk_len)
-    if b > a + 1e-3:
-        x0 = MERGE[0] + a
-        parts.append(f'<path stroke="{LIME}" stroke-width="{TRUNK_W}" '
-                     f'd="M{x0:.3f} 32H{MERGE[0] + b:.3f}"/>')
-    return "".join(parts)
+def wave(w, h, color, scale):
+    """A water line: PERIODS sine waves across w x h, round ends."""
+    pad = STROKE * scale / 2 + 0.5
+    amp = h / 2 - pad
+    n = 240
+    pts = []
+    for i in range(n + 1):
+        x = pad + (w - 2 * pad) * i / n
+        y = h / 2 - amp * math.sin(2 * math.pi * PERIODS * i / n)
+        pts.append(f"{x:.2f} {y:.2f}")
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
+            f'<path d="M{"L".join(pts)}" fill="none" stroke="{color}" stroke-width="{STROKE * scale:g}" '
+            f'stroke-linecap="round" stroke-linejoin="round"/></svg>')
 
 
 def rounded_rect(w, h, r, fill, stroke=None, stroke_opacity=1.0):
@@ -160,7 +169,7 @@ def render(jobs):
 
 
 def optimise(path):
-    """Re-save as a palette PNG (lossless here: few colours) to keep it small."""
+    """Re-save as a palette PNG when that is lossless (few colours), to keep it small."""
     im = Image.open(path).convert("RGBA")
     colours = im.getcolors(256)
     if colours is not None:
@@ -178,53 +187,60 @@ def main():
                     help="the agentux repository's brand/ directory")
     args = ap.parse_args()
     wordmark = args.brand / "svg/wordmark-mist.svg"
-    if not wordmark.is_file():
-        sys.exit(f"{wordmark} not found; pass --brand")
-    wm_svg = wordmark.read_text()
+    if not wordmark.is_file() or not (args.brand / "src/penguin.svg").is_file():
+        sys.exit(f"{args.brand} has no svg/wordmark-mist.svg or src/penguin.svg; pass --brand")
+    mark = Mark(load_penguin(args.brand))
+    wm_svg = wordmark.read_text(encoding="utf-8")
+    m = re.match(r'<svg [^>]*width="([0-9.]+)" height="([0-9.]+)"', wm_svg)
+    wm_size = m.group(0)
+    wm_ratio = float(m.group(2)) / float(m.group(1))
     tmp = HERE / ".build"
     tmp.mkdir(exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
+    for old in ("dashes.png", "dashes@2x.png"):  # the old mark's animation
+        (OUT / old).unlink(missing_ok=True)
 
     jobs = []
     for scale, suffix in ((1, ""), (2, "@2x")):
-        w, h = round(VIEW[2] * PX_PER_UNIT * scale), round(VIEW[3] * PX_PER_UNIT * scale)
-        jobs.append({"svg": svg(mark_body(), w, h), "out": str(OUT / f"mark{suffix}.png")})
+        width = MARK_W * scale
+        jobs.append({"svg": mark.svg(mark.full(), width), "out": str(OUT / f"mark{suffix}.png")})
         for f in range(FRAMES):
-            jobs.append({"svg": svg(dash_body(f), w, h), "out": str(tmp / f"dash{suffix}-{f:02d}.png")})
-        # Wordmark: 120 px wide at 1x, its own aspect ratio.
-        wm_w = 120 * scale
-        wm = wm_svg.replace('width="463.04" height="101.92"',
-                            f'width="{wm_w}" height="{round(wm_w * 101.92 / 463.04)}"', 1)
-        assert wm != wm_svg, "wordmark-mist.svg changed size; update build.py"
+            centre = START + (END - START) * ease(f / (FRAMES - 1))
+            jobs.append({"svg": mark.svg(mark.lit(centre), width),
+                         "out": str(tmp / f"wake{suffix}-{f:02d}.png")})
+        wm_w = WORDMARK_W * scale
+        wm = wm_svg.replace(wm_size, wm_size.replace(m.group(1), str(wm_w), 1)
+                            .replace(m.group(2), str(round(wm_w * wm_ratio)), 1), 1)
         jobs.append({"svg": wm, "out": str(OUT / f"wordmark{suffix}.png")})
+        # Progress: a Lime water line over a Graphite one.
+        pw, ph = PROGRESS_W * scale, PROGRESS_H * scale
+        jobs.append({"svg": wave(pw, ph, GRAPHITE, scale), "out": str(OUT / f"track{suffix}.png")})
+        jobs.append({"svg": wave(pw, ph, LIME, scale), "out": str(OUT / f"fill{suffix}.png")})
     # Shapes that scale cleanly: drawn once at 2x.
     jobs += [
         # Passphrase field: Graphite, a quiet Slate edge.
         {"svg": rounded_rect(640, 88, 16, GRAPHITE, SLATE, 0.28), "out": str(OUT / "entry.png")},
         {"svg": ('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">'
                  f'<circle cx="10" cy="10" r="10" fill="{LIME}"/></svg>'), "out": str(OUT / "bullet.png")},
-        # Progress: a Lime hairline on a Graphite one; round ends.
-        {"svg": rounded_rect(400, 4, 2, GRAPHITE), "out": str(OUT / "track.png")},
-        {"svg": rounded_rect(400, 4, 2, LIME), "out": str(OUT / "fill.png")},
     ]
     render(jobs)
 
     # Frames go into one sheet per scale (agentux.script crops them), COLUMNS wide.
     for suffix in ("", "@2x"):
-        frames = [Image.open(tmp / f"dash{suffix}-{f:02d}.png") for f in range(FRAMES)]
+        frames = [Image.open(tmp / f"wake{suffix}-{f:02d}.png") for f in range(FRAMES)]
         fw, fh = frames[0].size
         rows = math.ceil(FRAMES / COLUMNS)
         sheet = Image.new("RGBA", (fw * COLUMNS, fh * rows))
         for i, im in enumerate(frames):
             sheet.paste(im, ((i % COLUMNS) * fw, (i // COLUMNS) * fh))
-        sheet.save(OUT / f"dashes{suffix}.png")
-    script = (OUT / "agentux.script").read_text()
+        sheet.save(OUT / f"wake{suffix}.png")
+    script = (OUT / "agentux.script").read_text(encoding="utf-8")
     for name, value in (("FRAMES", FRAMES), ("COLUMNS", COLUMNS)):
         if f"\n{name} = {value};" not in script:
             sys.exit(f"agentux.script must say {name} = {value}; to match the sheets")
     for p in sorted(OUT.glob("*.png")):
         optimise(p)
-        print(f"{p.relative_to(HERE.parent)}  {p.stat().st_size} bytes")
+        print(f"{p.relative_to(HERE.parent).as_posix()}  {p.stat().st_size} bytes")
     for p in tmp.glob("*.png"):
         p.unlink()
     tmp.rmdir()
