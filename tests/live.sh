@@ -183,14 +183,20 @@ phase_approve() {
 }
 
 # The disk the install goes to: the VM's only disk.
-target=/dev/vda
+# LIVE_TARGET: the installed disk as the host sees it, for verify run there.
+target="${LIVE_TARGET:-/dev/vda}"
 
 phase_install() {
     test -b "$target" || { bad "no $target to install to"; return; }
+    # In live mode (liveinst, --liveinst) Anaconda takes no kickstart: its
+    # interactive defaults are only defaults, and the disk must be picked in
+    # the UI. So the test runs Anaconda as a plain kickstart install from the
+    # live system instead, with the answers below and the live installer's
+    # own payload (install.ks: the registry pull and the bootc switch).
     cat >/var/tmp/install-test.ks <<EOF
-# Live ISO test install. Answers what the interactive installer asks; the
-# payload is the live installer's own.
-text
+# Live ISO test install: the answers the installer UI would get, and the
+# payload the live installer uses.
+cmdline
 lang en_US.UTF-8
 keyboard us
 timezone UTC --utc
@@ -199,22 +205,64 @@ zerombr
 clearpart --all --initlabel --drives=${target#/dev/}
 autopart --noswap
 rootpw --lock
+# A graphical boot, as an install from the web UI gives (text mode would
+# default to multi-user.target).
+xconfig --startxonboot
 user --name=installtest --password=installtest --plaintext --groups=wheel
 %include /usr/share/agentux/live/install.ks
 EOF
     echo "      kickstart:"; indent </var/tmp/install-test.ks
-    local start=$SECONDS rc
-    # As liveinst would run it, minus the GUI; Anaconda wants a session bus.
-    dbus-run-session -- anaconda --liveinst --cmdline --kickstart /var/tmp/install-test.ks >/var/tmp/anaconda-test.out 2>&1
-    rc=$?
-    echo "metric  install time: $(( SECONDS - start ))s"
-    tail -n 40 /var/tmp/anaconda-test.out | indent
-    if [[ "$rc" == 0 ]] && ! grep -qi 'traceback\|installation failed' /var/tmp/anaconda-test.out; then
+    # The install takes a while and fills RAM (the live root and /var/tmp
+    # are tmpfs), so it runs as a unit of its own and install-result reports
+    # on it; the guest agent is kept out of the OOM killer's way.
+    local pid
+    for pid in $(pidof qemu-ga); do echo -1000 >"/proc/$pid/oom_score_adj"; done
+    # In /run: Anaconda remounts /var/tmp during the install.
+    rm -rf /run/agentux-install-test && mkdir -p /run/agentux-install-test
+    date +%s >/run/agentux-install-test/start
+    # Anaconda wants a session bus of its own.
+    systemd-run --unit=agentux-install-test --collect --property=OOMScoreAdjust=500 \
+        bash -c 'dbus-run-session -- anaconda --cmdline --kickstart /var/tmp/install-test.ks >/run/agentux-install-test/anaconda.out 2>&1; echo $? >/run/agentux-install-test/rc'
+    ok "install started (agentux-install-test.service)"
+}
+
+# Prints a line while the install runs; exits 0 once it has finished.
+phase_install_done() {
+    if [[ -e /run/agentux-install-test/rc ]]; then return 0; fi
+    echo "installing: $(free -m | awk '/^Mem:/ {print $3 "/" $2 " MiB"}'), /var/tmp $(df -m --output=used /var/tmp | tail -n1 | tr -d ' ') MiB, $(tail -n1 /run/agentux-install-test/anaconda.out 2>/dev/null | cut -c1-120)"
+    systemctl is-active -q agentux-install-test.service || { echo "install unit gone without a result"; return 0; }
+    return 1
+}
+
+phase_install_result() {
+    local rc
+    rc="$(cat /run/agentux-install-test/rc 2>/dev/null || echo "none")"
+    echo "metric  RAM after the install: $(free -m | awk '/^Mem:/ {print $3 " MiB of " $2 " MiB"}')"
+    if journalctl -k --no-pager | grep -qi 'out of memory'; then
+        echo "      the kernel killed processes for lack of memory:"
+        journalctl -k --no-pager | grep -i 'out of memory\|killed process' | tail -n 10 | indent
+    fi
+    # Anaconda halts the system at the end of a kickstart install (the
+    # default), often before its unit can write the result: then the
+    # installed disk, checked from the host, decides.
+    if [[ "$rc" == none ]]; then
+        echo "      no exit status: Anaconda is halting the live system after the install; the installed disk decides"
+        tail -n 40 /run/agentux-install-test/anaconda.out 2>/dev/null | indent
+        return
+    fi
+    # Anaconda can exit 0 without installing; the disk tells.
+    if [[ "$rc" == 0 ]] && ! lsblk -lnpo FSTYPE "$target" | grep -qE 'btrfs|xfs|ext4'; then
+        echo "      no file system on $target after the install"
+        rc=1
+    fi
+    tail -n 40 /run/agentux-install-test/anaconda.out | indent
+    if [[ "$rc" == 0 ]] && ! grep -qi 'traceback\|installation failed' /run/agentux-install-test/anaconda.out; then
         ok "anaconda installed to $target"
     else
         bad "anaconda failed (exit $rc)"
         tail -n 80 /tmp/anaconda.log 2>/dev/null | indent
         tail -n 80 /tmp/packaging.log 2>/dev/null | indent
+        grep -E " (ERR|WRN) " /tmp/storage.log 2>/dev/null | tail -n 40 | indent
     fi
 }
 
@@ -224,7 +272,7 @@ phase_verify() {
     umount -R "$mnt" 2>/dev/null
     # The partition holding the ostree repository (Btrfs, Kinoite's layout).
     for part in $(lsblk -lnpo NAME,FSTYPE "$target" | awk '$2 == "btrfs" || $2 == "xfs" || $2 == "ext4" {print $1}'); do
-        if mount -o ro "$part" "$mnt" 2>/dev/null; then
+        if mount -o ro "$part" "$mnt" 2>/dev/null || mount -o ro,rescue=nologreplay "$part" "$mnt" 2>/dev/null; then
             [[ -n "$(find "$mnt" -maxdepth 4 -path '*/ostree/deploy' -print -quit 2>/dev/null)" ]] && break
             umount "$mnt"
         fi
@@ -234,7 +282,7 @@ phase_verify() {
     local origin deploy image
     origin="$(find "$mnt" -maxdepth 7 -path '*/ostree/deploy/*/deploy/*.origin' -print -quit)"
     deploy="${origin%.origin}"
-    image="$(cat /usr/share/agentux/live/install-image)"
+    image="${LIVE_INSTALL_IMAGE:-$(cat /usr/share/agentux/live/install-image 2>/dev/null)}"
     echo "      deployment: ${deploy#"$mnt"}"
     indent <"$origin"
     if grep -qx "container-image-reference=ostree-unverified-registry:$image" "$origin"; then
@@ -245,9 +293,9 @@ phase_verify() {
     if [[ -e "$deploy/usr/share/agentux/live" ]]; then bad "live-only /usr/share/agentux/live in the installed system"; else ok "no live-only files in /usr"; fi
     if grep -q '^liveuser:' "$deploy/etc/passwd" 2>/dev/null; then bad "liveuser exists in the installed system"; else ok "no liveuser in the installed system"; fi
     if grep -q '^installtest:' "$deploy/etc/passwd" 2>/dev/null; then ok "the installer's user exists"; else warn "installtest user not found in the deployment's /etc/passwd"; fi
-    if [[ -e "$deploy/etc/systemd/user/default.target.wants/agentux-first-login.service" \
-        && -e "$deploy/etc/systemd/user/default.target.wants/agentux-antigravity-acp.service" \
-        && ! -e "$deploy/etc/systemd/user/default.target.wants/agentux-live-demo.service" ]]; then
+    if [[ -L "$deploy/etc/systemd/user/default.target.wants/agentux-first-login.service" \
+        && -L "$deploy/etc/systemd/user/default.target.wants/agentux-antigravity-acp.service" \
+        && ! -L "$deploy/etc/systemd/user/default.target.wants/agentux-live-demo.service" ]]; then
         ok "installed system runs first-login and the ACP server unit, not the live demo"
     else
         bad "installed system's user units differ from the image's"
@@ -270,6 +318,8 @@ case "$phase" in
     checks) phase_checks ;;
     approve) phase_approve ;;
     install) phase_install ;;
+    install-done) phase_install_done; exit $? ;;
+    install-result) phase_install_result ;;
     verify) phase_verify ;;
     *) echo "unknown phase $phase" >&2; exit 2 ;;
 esac

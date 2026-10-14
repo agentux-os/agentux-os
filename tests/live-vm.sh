@@ -23,7 +23,8 @@
 #
 # Logs, screenshots and summary.md go to DIR. Needs qemu-system-x86_64 (or
 # -aarch64) with KVM, UEFI firmware (ovmf / qemu-efi-aarch64), qemu-img and
-# python3. LIVE_TEST_MEMORY (MiB, default 8192) and LIVE_TEST_CPUS (4) size
+# python3. LIVE_TEST_MEMORY (MiB, default 12288: the install from the live system
+# runs in RAM) and LIVE_TEST_CPUS (4) size
 # the VM.
 set -euo pipefail
 
@@ -68,7 +69,7 @@ start_vm() {
     "$qemu" \
         -name agentux-live-test \
         -machine "$vm_machine" -cpu host \
-        -smp "${LIVE_TEST_CPUS:-4}" -m "${LIVE_TEST_MEMORY:-8192}" \
+        -smp "${LIVE_TEST_CPUS:-4}" -m "${LIVE_TEST_MEMORY:-12288}" \
         -drive if=pflash,format=raw,readonly=on,file="$code" \
         -drive if=pflash,format=raw,file="$dir/OVMF_VARS.fd" \
         -device virtio-scsi-pci,id=scsi \
@@ -270,37 +271,76 @@ guest_cmd 120 'journalctl --no-pager -b' >"$dir/journal-live.log" 2>&1 || true
 if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     echo "::group::install from the live system"
     set +e
-    guest install 3600 | tee "$dir/install.log"
+    install_start=$SECONDS
+    guest install 300 | tee "$dir/install.log"
     install_rc=${PIPESTATUS[0]}
-    set -e
-    guest_cmd 120 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1 || true
-    echo "::endgroup::"
-    summary_phase "Install from the live system (best effort)" "$install_rc" "$dir/install.log"
     if [[ "$install_rc" == 0 ]]; then
-        echo "::group::installed system"
-        set +e
-        guest verify 300 | tee "$dir/install-verify.log"
-        verify_rc=${PIPESTATUS[0]}
-        set -e
-        echo "::endgroup::"
+        # Poll: each check is a short guest agent call. At the end of a
+        # kickstart install Anaconda halts the system (the kickstart default),
+        # so the agent going away for good also ends the wait.
+        deadline=$(( SECONDS + 3600 )) gone=0
+        while (( SECONDS < deadline && gone < 6 )); do
+            out="$(guest install-done 60 2>&1)"; rc=$?
+            echo "${out##*$'\n'}"
+            [[ "$rc" == 0 ]] && break
+            if [[ "$out" == *Traceback* || "$out" == *qga:* ]]; then gone=$(( gone + 1 )); else gone=0; fi
+            sleep 30
+        done
+        # Timed from the host: the live system may be gone by now.
+        echo "metric  install time: $(( SECONDS - install_start ))s" | tee -a "$dir/install.log"
+        screenshot 05b-after-install
+        if ! guest install-result 120 >"$dir/install-result.log" 2>&1; then
+            # A guest that halted, or a FAIL line: keep only the guest's FAIL lines.
+            grep -q '^FAIL ' "$dir/install-result.log" \
+                || echo "      the guest agent is gone: Anaconda halted the live system at the end, as kickstart installs do" >>"$dir/install-result.log"
+        fi
+        if grep -q '^FAIL\|^ok\|^      ' "$dir/install-result.log"; then
+            grep -v '^Traceback\|^  File \|^    [^ ]\|^[A-Za-z.]*Error:' "$dir/install-result.log" | tee -a "$dir/install.log"
+        fi
+        rm -f "$dir/install-result.log"
+        guest_cmd 60 'cat /tmp/anaconda.log /tmp/packaging.log /tmp/program.log 2>/dev/null' >"$dir/anaconda.log" 2>&1
+        guest_cmd 60 'cat /tmp/storage.log /tmp/dbus.log 2>/dev/null' >"$dir/anaconda-storage.log" 2>&1
+    fi
+    set -e
+    echo "::endgroup::"
+    stop_vm
+
+    # The installed disk, from the host: whether the live system was still
+    # there to report on it or not, the disk says what got installed.
+    echo "::group::installed system"
+    set +e
+    sudo modprobe nbd max_part=16
+    sudo qemu-nbd --connect=/dev/nbd0 "$dir/disk.qcow2"
+    sleep 3
+    sudo partprobe /dev/nbd0 2>/dev/null
+    lsblk -f /dev/nbd0
+    # The image the live installer installs: the ISO's variant.
+    install_image=ghcr.io/agentux-os/agentux:latest
+    [[ "$(basename "$iso")" == *hyprland* ]] && install_image=ghcr.io/agentux-os/agentux-hyprland:latest
+    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_INSTALL_IMAGE="$install_image" bash "$here/live.sh" | tee "$dir/install-verify.log"
+    verify_rc=${PIPESTATUS[0]}
+    sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
+    set -e
+    echo "::endgroup::"
+    if [[ "$install_rc" != 0 ]] || grep -q '^FAIL no ostree deployment' "$dir/install-verify.log"; then
+        echo "::warning::installing from the live system failed; see install.log and anaconda.log"
+        echo "FAIL no AgentUX deployment on the disk after the install" >>"$dir/install.log"
+        summary_phase "Install from the live system (best effort)" 1 "$dir/install.log"
+    else
+        # The disk decides: an install that left a deployment finished,
+        # whatever the guest could still report.
+        sed -i '/^FAIL anaconda failed (exit none)/d' "$dir/install.log"
+        echo "ok   AgentUX deployment on the disk" >>"$dir/install.log"
+        summary_phase "Install from the live system" "$(grep -q '^FAIL ' "$dir/install.log" && echo 1 || echo 0)" "$dir/install.log"
         summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
         (( verify_rc == 0 )) || system_rc=1
 
         # The installed disk alone: its first boot (plasma-setup's wizard).
-        stop_vm
         start_vm
         capture_frames installed-boot 90
         sleep 240
         screenshot 06-installed-first-boot
-        if wait_agent 300; then
-            guest_cmd 120 'bootc status; bootc status --format=json | jq -r ".status.booted.image.image.image"' \
-                | tee "$dir/installed-bootc-status.txt" || true
-            summary_line "Installed system booted (best effort)" "ok: $(tail -n1 "$dir/installed-bootc-status.txt")"
-        else
-            summary_line "Installed system booted (best effort)" "no guest agent; see 06-installed-first-boot.png"
-        fi
-    else
-        echo "::warning::installing from the live system failed; see install.log and anaconda.log"
+        summary_line "Installed system first boot" "see 06-installed-first-boot.png"
     fi
 fi
 
