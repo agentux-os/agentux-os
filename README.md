@@ -205,6 +205,47 @@ sha256sum --check agentux-live-x86_64.iso.sha256
 cosign verify-blob --key files/etc/pki/containers/agentux-os.pub   --bundle agentux-live-x86_64.iso.sha256.sigstore.json agentux-live-x86_64.iso.sha256
 ```
 
+Every directory also has **`SHA256SUMS`**, the checksums of all its ISOs in one file, signed the same way (`SHA256SUMS.sigstore.json`). It is rebuilt from the directory's `.sha256` files after every upload (the ISOs of a directory come from separate jobs), so it always lists what is there:
+
+```sh
+cosign verify-blob --key files/etc/pki/containers/agentux-os.pub --bundle SHA256SUMS.sigstore.json SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+**[`latest.json`](https://download.agentuxos.org/latest.json)** (with `latest.json.sigstore.json`) describes the newest release for the website's download buttons; it is rewritten, last, whenever the stable channel moves:
+
+```json
+{
+  "version": "v0.5.0",
+  "date": "2026-10-20T12:00:00Z",
+  "channel": "stable",
+  "release_notes": "https://github.com/agentux-os/agentux-os/releases/tag/v0.5.0",
+  "sha256sums": "https://download.agentuxos.org/iso/v0.5.0/SHA256SUMS",
+  "sha256sums_signature": "https://download.agentuxos.org/iso/v0.5.0/SHA256SUMS.sigstore.json",
+  "public_key": "https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub",
+  "images": {
+    "plasma": {"ref": "ghcr.io/agentux-os/agentux:v0.5.0", "channel": "ghcr.io/agentux-os/agentux:stable", "digest": "sha256:..."},
+    "hyprland": {"ref": "ghcr.io/agentux-os/agentux-hyprland:v0.5.0", "channel": "ghcr.io/agentux-os/agentux-hyprland:stable", "digest": "sha256:..."}
+  },
+  "isos": [
+    {
+      "name": "agentux-live-v0.5.0-x86_64.iso",
+      "url": "https://download.agentuxos.org/iso/v0.5.0/agentux-live-v0.5.0-x86_64.iso",
+      "stable_url": "https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso",
+      "size": 3712345678,
+      "sha256": "...",
+      "arch": "x86_64",
+      "kind": "live",
+      "variant": "plasma",
+      "channel": "stable",
+      "boot_tested": true
+    }
+  ]
+}
+```
+
+`isos` lists live before installer and x86_64 before aarch64; `kind` is `live` or `installer`, `size` is in bytes, and `boot_tested` says whether CI booted and installed that ISO before publishing it. A page on another origin that fetches it from the browser needs a CORS rule on the bucket allowing `GET` from that origin.
+
 The bucket is written with the secrets `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `agentux-downloads` only). They belong in the `release` and `nightly` environments, not the repository, so only an approved release or a run on `main` can write the bucket (see [Signing and approval](#signing-and-approval-what-the-gate-does-and-does-not-do)); the publishing jobs read them from their environment, and fall back to repository secrets of the same name while those still exist.
 
 ## Install

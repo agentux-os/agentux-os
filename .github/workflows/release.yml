@@ -16,7 +16,8 @@ name: Release
 #                v* tags only, wendelmax as required reviewer), then moves
 #                :<tag> and :stable to the candidate digests, publishes the
 #                ISOs in iso/<tag>/ and iso/stable/ on download.agentuxos.org
-#                and creates the GitHub release.
+#                (with a signed SHA256SUMS in each), creates the GitHub
+#                release and points latest.json at it.
 #
 # Approving is the last step, after every build and test of the tag passed;
 # rejecting it (or letting it time out) leaves :stable, the downloads and the
@@ -167,6 +168,8 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
+          PLASMA_DIGEST: ${{ needs.candidate.outputs.plasma }}
+          HYPRLAND_DIGEST: ${{ needs.candidate.outputs.hyprland }}
           EXPECT: >-
             agentux-${{ github.ref_name }}-x86_64 agentux-${{ github.ref_name }}-aarch64
             agentux-live-${{ github.ref_name }}-x86_64 agentux-live-${{ github.ref_name }}-aarch64
