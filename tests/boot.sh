@@ -104,6 +104,18 @@ check_image() {
     fi
 }
 
+# An Anaconda install (installer or live ISO) must not leave / in fstab:
+# systemd-remount-fs would fail on the composefs root at every boot.
+check_fstab() {
+    echo "== fstab"
+    indent </etc/fstab
+    if awk '$2 == "/" && $1 !~ /^#/ {found = 1} END {exit !found}' /etc/fstab; then
+        bad "/etc/fstab mounts / (systemd-remount-fs fails on the composefs root)"
+    else
+        ok "no root entry in /etc/fstab (ostree mounts /)"
+    fi
+}
+
 # What `bootc upgrade` checks: the policy requires the AgentUX key for both
 # repositories, the key is there, and registries.d fetches the signatures.
 check_policy() {
@@ -845,6 +857,7 @@ case "$phase" in
     installed)
         check_image
         check_policy
+        check_fstab
         check_system
         ;;
     desktop)
