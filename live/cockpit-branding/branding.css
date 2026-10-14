@@ -29,11 +29,15 @@
 :not(.pf-v6-theme-dark) .anaconda {
     --pf-t--global--color--brand--default: #4f7d0b;
     --pf-t--global--color--brand--hover: #3b5e08;
+    --pf-t--global--text--color--link--default: #4f7d0b;
+    --pf-t--global--text--color--link--hover: #3b5e08;
 }
 
 .pf-v6-theme-dark .anaconda {
     --pf-t--global--color--brand--default: #c6f36b;
     --pf-t--global--color--brand--hover: #d6f78f;
+    --pf-t--global--text--color--link--default: #c6f36b;
+    --pf-t--global--text--color--link--hover: #d6f78f;
 }
 
 /* The title bar: Ink with a Graphite glow behind the mark, Mist text,
