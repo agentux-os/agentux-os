@@ -26,6 +26,10 @@ on:
         description: Also install from the live session to the test VM's disk
         type: boolean
         default: true
+      publish:
+        description: Publish the ISO on download.agentuxos.org (iso/builds/ and iso/latest/)
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
   schedule:
@@ -77,7 +81,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
     permissions:
-      contents: read
+      contents: write # the GitHub release, for a tag
       packages: read
     steps:
       - uses: actions/checkout@v4
@@ -118,7 +122,11 @@ jobs:
       - name: Name and checksum the ISO
         id: iso
         run: |
-          name="${ISO_PREFIX}-$(date -u +%Y%m%d)-${{ matrix.arch }}"
+          # A tag build is named after the tag (its download links are known in
+          # advance), any other after the day.
+          version="$(date -u +%Y%m%d)"
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then version=$GITHUB_REF_NAME; fi
+          name="${ISO_PREFIX}-${version}-${{ matrix.arch }}"
           mv "${{ steps.titanoboa.outputs.iso-dest }}" "$name.iso"
           sha256sum "$name.iso" > "$name.iso.sha256"
           ls -lh "$name.iso"
@@ -200,3 +208,22 @@ jobs:
             output/live-test/summary.md
           retention-days: 14
           if-no-files-found: warn
+
+      # download.agentuxos.org, and the GitHub release for a tag
+      # (.github/scripts/publish-iso.sh): tags, the weekly build and a
+      # dispatch with publish set; never pull requests.
+      - uses: sigstore/cosign-installer@v4.1.2
+        if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.publish) }}
+      - name: Publish the ISO
+        if: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || inputs.publish) }}
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ env.ISO_PREFIX }}-${{ matrix.arch }}
+        run: |
+          command -v aws >/dev/null || sudo snap install aws-cli --classic
+          .github/scripts/publish-iso.sh "${{ steps.iso.outputs.name }}" "$LATEST"
