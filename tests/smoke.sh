@@ -370,6 +370,7 @@ welcome_wizard() {
         if out="$(as_user timeout 900 "$setup" install "$item" 2>&1 </dev/null)"; then
             echo "ok    agentux-setup install $item"
             # What the wizard then shows: the item done, and found installed.
+            # shellcheck disable=SC2016 # jq variables
             status="$(as_user "$setup" status --scan </dev/null)"
             assert "status: $item done and installed" \
                 jq -e --arg i "$item" '.items[$i].state == "done" and (.installed | index($i))' <<<"$status"
