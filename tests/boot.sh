@@ -571,6 +571,35 @@ check_desktop_files() {
         bash -c "grep -qx '\[Module-kded_plasma_welcome\]' /etc/xdg/kded5rc && grep -qx 'autoload=false' /etc/xdg/kded5rc"
 }
 
+# The welcome wizard (agentux-desktop): its login autostart entry, the app
+# menu entry, its backend, and the first-run marker that decides whether the
+# autostart opens it. The marker cases use a scratch XDG_STATE_HOME, so the
+# test user's own marker is left alone.
+check_welcome_files() {
+    echo "== welcome wizard"
+    local setup=/usr/libexec/agentux-setup tmp
+    assert "welcome autostart entry runs agentux-setup autostart" \
+        grep -qx 'Exec=/usr/libexec/agentux-setup autostart' /etc/xdg/autostart/agentux-welcome.desktop
+    assert "Welcome to AgentUX in the app menu" \
+        grep -qx 'Exec=agentux-cockpit --welcome' /usr/share/applications/agentux-welcome.desktop
+    assert "$setup executable" test -x "$setup"
+    assert "setup catalog parses" jq -e '.items | length > 0' /usr/share/agentux/setup/catalog.json
+    tmp="$(mktemp -d)"
+    assert "should-run: yes for a new user" env XDG_STATE_HOME="$tmp" "$setup" should-run
+    assert "finish writes the marker" env XDG_STATE_HOME="$tmp" "$setup" finish
+    assert "marker at \$XDG_STATE_HOME/agentux/welcome.done" test -e "$tmp/agentux/welcome.done"
+    assert "should-run: no once finished" bash -c "! XDG_STATE_HOME='$tmp' '$setup' should-run"
+    assert "reset removes the marker" env XDG_STATE_HOME="$tmp" "$setup" reset
+    assert "should-run: yes after reset" env XDG_STATE_HOME="$tmp" "$setup" should-run
+    rm -rf "$tmp"
+    local status
+    if status="$("$setup" status 2>&1)" && jq -e '.firstLogin.active and (.agents | length == 4)' <<<"$status" >/dev/null; then
+        ok "agentux-setup status  [$(jq -c '{flathub, firstLogin: .firstLogin.active, agents: [.agents[] | select(.installed) | .id]}' <<<"$status")]"
+    else
+        bad "agentux-setup status did not print the expected JSON"; indent <<<"$status"
+    fi
+}
+
 check_user_path() {
     echo "== tools on the user manager's PATH (as user services and Plasma apps see it)"
     local path
@@ -852,6 +881,16 @@ check_desktop() {
     # stays active.
     assert 'app-agentux\x2dcockpit@autostart.service active' \
         systemctl --user is-active 'app-agentux\x2dcockpit@autostart.service'
+    # The welcome wizard's autostart ran for the test user (it hands
+    # `--welcome` to the running cockpit and exits).
+    local welcome='app-agentux\x2dwelcome@autostart.service' started result
+    started="$(systemctl --user show -P ExecMainStartTimestampMonotonic "$welcome" 2>/dev/null)"
+    result="$(systemctl --user show -P Result "$welcome" 2>/dev/null)"
+    if [[ -n "$started" && "$started" != 0 ]]; then
+        ok "$welcome ran (result: ${result:-unknown})"
+    else
+        warn "$welcome did not run"
+    fi
     # The Welcome Center would open some seconds into the session.
     sleep 20
     check_no_welcome
@@ -881,6 +920,7 @@ case "$phase" in
         check_system_users
         check_wizard_session
         check_desktop_files
+        check_welcome_files
         check_aux_version
         check_user_path
         check_agentuxd
