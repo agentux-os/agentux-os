@@ -320,11 +320,16 @@ RUN jq --arg key /etc/pki/containers/agentux-os.pub \
 # plasma-setup's first-boot wizard, must not start it), or if nm-online
 # (NetworkManager), which first-login waits for the network with, goes missing.
 RUN chmod 0755 /usr/libexec/agentux/first-login \
+    && chmod 0755 /usr/bin/agentux \
+    && chmod 0755 /usr/libexec/agentux/profile-command \
+    && jq empty /usr/share/agentux/profiles/catalog.json \
+    && jq -e '.profiles.workstation.components | index("node") and index("desktop")' /usr/share/agentux/profiles/catalog.json > /dev/null \
     && exec_start="$(sed -n 's/^ExecStart=\([^ ]*\).*/\1/p' /usr/lib/systemd/user/agentuxd.service)" \
     && test -x "$exec_start" \
     && grep -qx 'ConditionUser=!@system' /usr/lib/systemd/user/agentuxd.service \
     && test -x /usr/bin/nm-online \
-    && systemctl --global enable agentux-first-login.service agentux-antigravity-acp.service agentuxd.service
+    && systemctl --global enable agentux-first-login.service agentux-antigravity-acp.service agentuxd.service \
+    && systemctl enable agentux-profile-apply.service
 
 LABEL org.opencontainers.image.title="AgentUX" \
       org.opencontainers.image.description="The Linux distribution where every coding agent works as one team" \

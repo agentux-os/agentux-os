@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply the AgentUX installation profile
+ConditionPathExists=/var/lib/agentux/profile-intent.json
+After=local-fs.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/agentux profile apply-intent
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

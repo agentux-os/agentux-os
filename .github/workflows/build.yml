@@ -357,6 +357,9 @@ jobs:
           podman run --rm --env GITHUB_TOKEN --env SMOKE_SUMMARY=/out/summary.md --env SMOKE_VARIANT=${{ matrix.variant }} \
             -v ./tests:/tests:ro -v "$RUNNER_TEMP/smoke:/out" agentux:ci /tests/smoke.sh
 
+      - name: Installation profile contract
+        run: podman run --rm -v "$PWD:/src:ro" agentux:ci /src/tests/profile.sh
+
       - name: Summary
         if: always()
         run: |
@@ -373,7 +376,7 @@ jobs:
 
       - name: shellcheck
         run: |
-          shellcheck installer/brand-iso.sh files/usr/bin/agentux-version files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
+          shellcheck installer/brand-iso.sh files/usr/bin/agentux-version files/usr/bin/agentux files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
           shellcheck --shell=sh live/livesys-session-extra
 
       - name: hadolint
