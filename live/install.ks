@@ -20,6 +20,12 @@ ostreecontainer --url=@INSTALL_IMAGE@ --transport=registry
 %post --erroronfail
 set -e
 bootc switch --mutate-in-place --transport registry @TRACK_IMAGE@
+# The profile selector may provide AGENTUX_PROFILE in a future branded
+# installer flow. Keep the seed optional so offline/base installs behave as
+# they do today; first boot applies it through agentux-profile-apply.service.
+if [ -n "${AGENTUX_PROFILE:-}" ] && command -v agentux >/dev/null 2>&1; then
+    agentux profile seed "$AGENTUX_PROFILE"
+fi
 # Anaconda writes the root file system into /etc/fstab (btrfs, with
 # subvol=root and its mount options). On a bootc system / is a composefs
 # overlay that the initramfs mounts from the kernel command line (root=,
