@@ -42,6 +42,7 @@
 # COSIGN_PRIVATE_KEY, COSIGN_PASSWORD; GH_TOKEN for a release.
 set -euo pipefail
 
+here=$(cd "$(dirname "$0")" && pwd) # the script cds into DIR below
 mode=${1:?usage: publish-iso.sh nightly|release DIR}
 dir=$(cd "${2:?usage: publish-iso.sh nightly|release DIR}" && pwd)
 bucket=agentux-downloads
@@ -78,7 +79,12 @@ export AWS_DEFAULT_REGION=auto
 # R2 does not support the newer default checksum headers of the AWS CLI.
 export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-s3() { aws s3 --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" --only-show-errors "$@"; }
+# --only-show-errors is an option of cp, not of ls (which rejects it).
+s3() {
+    local quiet=(--only-show-errors)
+    [[ $1 == ls ]] && quiet=()
+    aws s3 --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" "${quiet[@]}" "$@"
+}
 # Files that are replaced (channel copies) are cached briefly; the ISOs
 # themselves are too large for Cloudflare's cache anyway.
 short="public, max-age=300"
@@ -191,7 +197,7 @@ if [[ -n $versioned ]]; then sums "$versioned"; fi
 sums "$channel"
 
 # The directory pages (R2 lists nothing by itself).
-"$(dirname "$0")/download-index.sh"
+"$here/download-index.sh"
 
 [[ $mode == release ]] || exit 0
 
@@ -280,4 +286,4 @@ s3 cp latest.json.sigstore.json "s3://$bucket/latest.json.sigstore.json" \
 echo "- [\`latest.json\`]($base/latest.json) now names $tag" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 # Again, so / lists latest.json from the first release on.
-"$(dirname "$0")/download-index.sh"
+"$here/download-index.sh"
