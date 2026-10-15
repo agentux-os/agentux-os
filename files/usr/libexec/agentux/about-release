@@ -1,0 +1,9 @@
+#!/usr/bin/bash
+# KDE's About this System runs this (ExtraSoftwareData in
+# /etc/xdg/kcm-about-distrorc) and shows its two lines as a label and a
+# value: the AgentUX release and channel, from agentux-version. Kinfocenter
+# aborts on fewer than two lines, so there is always a fallback.
+out="$(timeout 10 /usr/bin/agentux-version --about 2>/dev/null)"
+label="$(sed -n 1p <<<"$out")"
+value="$(sed -n 2p <<<"$out")"
+printf '%s\n%s\n' "${label:-Release:}" "${value:-unknown}"

@@ -1,0 +1,169 @@
+#!/usr/bin/bash
+# agentux-version: which AgentUX this system runs.
+#
+#   agentux-version            a summary for people
+#   agentux-version --json     the same as JSON, for tools (aux, the cockpit)
+#   agentux-version --about    two lines for KDE's About this System
+#                              (/usr/libexec/agentux/about-release)
+#   agentux-version --refresh  as root: fetch the list of releases into
+#                              /var/cache/agentux/releases.json
+#                              (agentux-releases.service, daily)
+#
+# Where each part comes from (ADR 0012 in agentux-os/agentux):
+#
+#   build     /usr/lib/os-release, stamped when the image was built:
+#             IMAGE_VERSION (<date>.<short commit>), VERSION (the date).
+#   image     the booted image reference and digest, from bootc (as root) or
+#             rpm-ostree (as anyone): ghcr.io/agentux-os/agentux:stable, ...
+#   channel   that reference's tag: stable, latest (nightly), or a pin.
+#   release   a release is a promotion of an image built earlier, so the
+#             image cannot carry its own release name. A :v* reference names
+#             it; otherwise the booted digest is looked up in
+#             https://download.agentuxos.org/releases.json (digest -> tag,
+#             published by each release), cached by agentux-releases.service.
+#             The list is informational: what is installed and what updates
+#             is decided by bootc and the image signatures, never by it.
+#   base      the Fedora release underneath, from the base image's
+#             os-release (/usr/share/agentux/os-release.base).
+set -uo pipefail
+
+releases_url="${AGENTUX_RELEASES_URL:-https://download.agentuxos.org/releases.json}"
+cache_dir=/var/cache/agentux
+cache="$cache_dir/releases.json"
+
+usage() {
+    echo "usage: agentux-version [--json | --about | --refresh]" >&2
+    exit 2
+}
+
+mode=text
+case "${1:-}" in
+    "") ;;
+    --json) mode=json ;;
+    --about) mode=about ;;
+    --refresh) mode=refresh ;;
+    -h | --help) sed -n '2,/^set /{/^set /d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
+    *) usage ;;
+esac
+
+# ---- --refresh -----------------------------------------------------------------
+
+if [[ $mode == refresh ]]; then
+    if [[ $(id -u) != 0 ]]; then
+        echo "agentux-version --refresh: run as root (agentux-releases.service does)" >&2
+        exit 1
+    fi
+    mkdir -p "$cache_dir"
+    tmp="$(mktemp "$cache_dir/.releases.XXXXXX")" || exit 1
+    trap 'rm -f "$tmp"' EXIT
+    # A network failure is not an error: the system may be offline, and the
+    # previous list (if any) stays.
+    if ! curl -fsSL --max-time 60 --retry 3 --retry-delay 10 -o "$tmp" "$releases_url"; then
+        echo "could not fetch $releases_url; keeping the cached list" >&2
+        exit 0
+    fi
+    if ! jq -e '.schema == 1 and (.releases | type == "array")' "$tmp" >/dev/null 2>&1; then
+        echo "$releases_url is not a release list (schema 1); keeping the cached list" >&2
+        exit 0
+    fi
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$cache"
+    echo "$cache: $(jq '.releases | length' "$cache") releases"
+    exit 0
+fi
+
+# ---- what the image says about itself ------------------------------------------------
+
+osr() { sed -n "s/^$1=//p" "${2:-/usr/lib/os-release}" | sed 's/^"\(.*\)"$/\1/' | head -n1; }
+name="$(osr NAME)"
+version="$(osr VERSION)"
+image_version="$(osr IMAGE_VERSION)"
+image_id="$(osr IMAGE_ID)"
+variant="$(osr VARIANT)"
+commit="$(cat /usr/share/agentux/commit 2>/dev/null || true)"
+base="$(osr PRETTY_NAME /usr/share/agentux/os-release.base 2>/dev/null)"
+
+# ---- what is booted ----------------------------------------------------------------------
+
+ref="" digest=""
+if [[ $(id -u) == 0 ]] && command -v bootc >/dev/null; then
+    if status="$(timeout 20 bootc status --format=json 2>/dev/null)"; then
+        ref="$(jq -r '.status.booted.image.image.image // empty' <<<"$status" 2>/dev/null)"
+        digest="$(jq -r '.status.booted.image.imageDigest // empty' <<<"$status" 2>/dev/null)"
+    fi
+fi
+if [[ -z $ref ]] && command -v rpm-ostree >/dev/null && [[ -e /run/ostree-booted ]]; then
+    if status="$(timeout 20 rpm-ostree status --booted --json 2>/dev/null)"; then
+        ref="$(jq -r '[.deployments[] | select(.booted)][0]["container-image-reference"] // empty' <<<"$status" 2>/dev/null)"
+        digest="$(jq -r '[.deployments[] | select(.booted)][0]["container-image-reference-digest"] // empty' <<<"$status" 2>/dev/null)"
+        # ostree-image-signed:docker://ghcr.io/..., ostree-unverified-registry:ghcr.io/...
+        ref="${ref##*docker://}"
+        ref="${ref#ostree-unverified-registry:}"
+    fi
+fi
+
+# The tag (or digest) of the reference: the channel.
+tag="" channel=""
+if [[ $ref == *@sha256:* ]]; then
+    channel="pinned to a digest"
+elif [[ -n $ref ]]; then
+    last="${ref##*/}"
+    [[ $last == *:* ]] && tag="${last##*:}"
+    case "$tag" in
+        stable) channel=stable ;;
+        latest) channel=nightly ;;
+        v[0-9]*) channel="pinned to $tag" ;;
+        "") channel=nightly ;; # no tag is :latest
+        *) channel="pinned to :$tag" ;;
+    esac
+fi
+
+# The release: the tag itself, or the booted digest in the cached list.
+release=""
+if [[ $tag == v[0-9]* ]]; then
+    release="$tag"
+elif [[ -n $digest && -r $cache ]]; then
+    release="$(jq -r --arg d "$digest" '
+        [.releases[] | select(any(.images[]?; .digest == $d or ((.manifests // {}) | any(.[]; . == $d)))) | .tag]
+        | first // empty' "$cache" 2>/dev/null)"
+fi
+
+# One line on the release and channel, for people.
+if [[ -n $release ]]; then
+    summary="$release"
+    [[ -n $channel && $channel != "pinned to $release" ]] && summary+=" ($channel channel)"
+elif [[ $channel == nightly ]]; then
+    summary="nightly build $image_version (latest channel)"
+elif [[ $channel == stable ]]; then
+    if [[ -r $cache ]]; then summary="stable channel, build $image_version (not in the release list)"
+    else summary="stable channel, build $image_version (release list not fetched yet)"; fi
+elif [[ -n $channel ]]; then
+    summary="build $image_version ($channel)"
+else
+    summary="build $image_version (not booted from an image)"
+fi
+
+case "$mode" in
+    json)
+        jq -n --arg name "$name" --arg version "$version" --arg image_version "$image_version" \
+            --arg image_id "$image_id" --arg variant "$variant" --arg commit "$commit" \
+            --arg image "$ref" --arg digest "$digest" --arg channel "$channel" \
+            --arg release "$release" --arg summary "$summary" --arg base "$base" \
+            '{name: $name, version: $version, image_version: $image_version, image_id: $image_id,
+              variant: $variant, commit: $commit, image: $image, digest: $digest,
+              channel: $channel, release: $release, summary: $summary, base: $base}
+             | with_entries(if .value == "" then .value = null else . end)'
+        ;;
+    about)
+        printf 'Release:\n%s\n' "$summary"
+        ;;
+    text)
+        echo "$name $version${variant:+ ($variant)}"
+        printf '  %-10s %s\n' "Release:" "$summary"
+        printf '  %-10s %s\n' "Image:" "${ref:-unknown (not a booted bootc system)}"
+        [[ -n $digest ]] && printf '  %-10s %s\n' "Digest:" "$digest"
+        printf '  %-10s %s\n' "Build:" "$image_version${commit:+ (commit $commit)}"
+        [[ -n $base ]] && printf '  %-10s %s\n' "Based on:" "$base"
+        ;;
+esac
+exit 0

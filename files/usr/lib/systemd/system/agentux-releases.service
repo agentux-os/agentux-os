@@ -1,0 +1,23 @@
+[Unit]
+Description=Fetch the list of AgentUX releases
+Documentation=https://github.com/agentux-os/agentux-os#version
+# agentux-version (and KDE's About page) name the release this system runs by
+# looking its image digest up in this list; see /usr/bin/agentux-version.
+# Being offline is not a failure: the cached list stays.
+Wants=network-online.target
+After=network-online.target
+ConditionKernelCommandLine=!rd.live.image
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/agentux-version --refresh
+CacheDirectory=agentux
+CacheDirectoryMode=0755
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK

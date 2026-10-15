@@ -66,7 +66,7 @@ Use `:latest` instead of `:stable` for the nightly builds ([Release channels](#r
 ## Contents
 
 - **Use it:** [Variants](#variants) · [Architectures](#architectures) · [Release channels](#release-channels) · [Install](#install) · [Try it live](#try-it-live) · [Downloads](#downloads) · [Verifying the image](#verifying-the-image)
-- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Default wallpaper](#default-wallpaper) · [Hyprland](#hyprland) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
+- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Version](#version) · [Default wallpaper](#default-wallpaper) · [Hyprland](#hyprland) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
 - **Work on it:** [Build and test locally](#build-and-test-locally) · [Boot test](#boot-test) · [Live ISO test](#live-iso-test) · [Installer ISO test](#installer-iso-test) · [How a release reaches `:stable`](#how-a-release-reaches-stable) · [License](#license)
 
 Deep reference detail is folded away in collapsible sections; click a summary to expand it.
@@ -353,26 +353,46 @@ The signing key lives in the repository secrets `COSIGN_PRIVATE_KEY` and `COSIGN
 
 ## Identity
 
-`/usr/lib/os-release` (`/etc/os-release` links to it) names the system AgentUX, as Universal Blue images do for theirs, so the first-boot wizard says "Powered by AgentUX", and the boot menu, `hostnamectl` and KDE's About this System show `AgentUX <date> (Fedora Linux 44 base)` with the AgentUX logo:
+`/usr/lib/os-release` (`/etc/os-release` links to it) names the system AgentUX, as Universal Blue images do for theirs, with AgentUX's version: the first-boot wizard says "Powered by AgentUX", and the boot menu, the installers' title bars, `hostnamectl` and KDE's About this System show `AgentUX 2026.10.15` with the AgentUX logo. Fedora's release appears only where it is labelled as the base. See [ADR 0012](https://github.com/agentux-os/agentux/blob/main/docs/adr/0012-system-version-and-release-identity.md).
 
 <details>
 <summary>Every os-release field and why</summary>
 
 | Field | Value | Why |
 |---|---|---|
-| `NAME`, `PRETTY_NAME`, `VERSION` | `AgentUX`, `AgentUX <YYYYMMDD> (Fedora Linux 44 base)`, `<YYYYMMDD> (Fedora Linux 44 base)` | What people see. The date is the build's, as in the dated image tag; `--build-arg AGENTUX_VERSION=…` overrides it |
-| `IMAGE_ID`, `IMAGE_VERSION` | `agentux`, `<YYYYMMDD>` | systemd's fields for image-based systems |
+| `NAME`, `PRETTY_NAME`, `VERSION` | `AgentUX`, `AgentUX 2026.10.15`, `2026.10.15` | What people see: the build's date (UTC) |
+| `IMAGE_ID`, `IMAGE_VERSION`, `BUILD_ID` | `agentux`, `2026.10.15.063578e`, the same | systemd's fields for image-based systems: the build's date and short commit (build.yml passes `AGENTUX_VERSION`; a local build gets the date alone). The full commit is in `/usr/share/agentux/commit` and both are the image's `org.opencontainers.image.version` and `.revision` labels |
 | `VARIANT`, `VARIANT_ID` | `Plasma`, `agentux` | |
 | `LOGO` | `agentux` | The brand's app icon, installed as `agentux` in `hicolor` (16–256 px and scalable) and `/usr/share/pixmaps` |
-| `HOME_URL`, `DOCUMENTATION_URL`, `SUPPORT_URL`, `BUG_REPORT_URL` | the agentux-os repositories | |
+| `HOME_URL`, `DOCUMENTATION_URL`, `SUPPORT_URL`, `BUG_REPORT_URL` | `https://agentuxos.org`, the agentux README, the agentux and agentux-os issues | |
 | `DEFAULT_HOSTNAME` | `agentux` | Hostname when none is set |
 | `ANSI_COLOR` | Lime | systemd prints the name in it at boot |
 | `ID`, `VERSION_ID`, `CPE_NAME`, `SUPPORT_END` (and `PLATFORM_ID`, which Fedora 44 does not set) | Fedora's (`fedora`, `44`, …), unchanged; the base image's os-release is kept as `/usr/share/agentux/os-release.base` and the build and tests compare against it | Tools key on these: bootc-image-builder picks its Fedora definitions by `ID`/`VERSION_ID`, dnf5 resolves `$releasever` from `VERSION_ID`, toolbox picks `fedora-toolbox:<VERSION_ID>` by `ID`, vulnerability scanners map `CPE_NAME` to Fedora's advisories. All of that is still true of this system, so they stay Fedora's (Bluefin and Aurora change `ID` and set `ID_LIKE=fedora` instead, and carry workarounds for it). Fedora sets no `ID_LIKE` |
-| `REDHAT_BUGZILLA_PRODUCT*` | removed | Bug reports about this image belong to AgentUX, not Fedora's Bugzilla |
+| `REDHAT_BUGZILLA_PRODUCT*`, `REDHAT_SUPPORT_PRODUCT*` | removed | Bug reports about this image belong to AgentUX, not Fedora's Bugzilla |
 
-[`/etc/xdg/kcm-about-distrorc`](files/etc/xdg/kcm-about-distrorc) replaces Fedora's (which pointed at Fedora's logo) for KDE's About this System: the AgentUX logo, the AgentUX website, and `VERSION` instead of `VERSION_ID` next to the name. The build fails if the Fedora fields changed or the icon is missing; the smoke and boot tests check the fields again.
+`/etc/system-release` (in Fedora a link to `fedora-release`) is `AgentUX release 2026.10.15`: bootupd names the firmware's boot entry after it (the "Fedora" entry in a UEFI boot menu becomes "AgentUX"), and the live installer takes its product name from it. `/etc/fedora-release` and `/etc/redhat-release` stay Fedora's.
+
+[`/etc/xdg/kcm-about-distrorc`](files/etc/xdg/kcm-about-distrorc) replaces Fedora's (which pointed at Fedora's logo) for KDE's About this System: the AgentUX logo, agentuxos.org, `VERSION` instead of `VERSION_ID` next to the name, and two extra lines from scripts: **Release** (below) and **Based on** (`Fedora Linux 44 (Kinoite)`). The build fails if the Fedora fields changed or the icon is missing; the smoke and boot tests check the fields again.
 
 </details>
+
+### Version
+
+A release does not rebuild the image: it promotes main's already-built, tested image to `:<tag>` and `:stable` ([Release channels](#release-channels)). So the image can carry its build (the date and commit above), but not the release it later became. Which release a system runs is worked out at run time, by `agentux-version`:
+
+```console
+$ agentux-version
+AgentUX 2026.10.15 (Plasma)
+  Release:   v0.5.3 (stable channel)
+  Image:     ghcr.io/agentux-os/agentux:stable
+  Digest:    sha256:…
+  Build:     2026.10.15.063578e (commit 063578e…)
+  Based on:  Fedora Linux 44 (Kinoite)
+```
+
+- **Image and channel:** the booted image reference and digest, from `bootc status` (as root) or `rpm-ostree status` (as anyone). The tag is the channel: `:stable`, `:latest` (nightly), or a pin such as `:v0.5.3`.
+- **Release:** a `:v*` reference names it. Otherwise the booted digest is looked up in `https://download.agentuxos.org/releases.json`, which every release regenerates from the registry's `v*` tags (each tag with its list digest, both architectures' digests and the image version, signed like `latest.json`). `agentux-releases.timer` fetches it two minutes after boot and daily, into `/var/cache/agentux/releases.json`; offline, the cached list stays. It is one anonymous GET of a public file; `systemctl disable --now agentux-releases.timer` turns it off. The list only names things: bootc and the image signatures decide what is installed and updated.
+- `agentux-version --json` gives the same for tools (the cockpit, `aux`); KDE's About page shows the Release line through `/usr/libexec/agentux/about-release`.
 
 ## Default wallpaper
 
