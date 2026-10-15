@@ -33,9 +33,20 @@ live image="ghcr.io/agentux-os/agentux:latest":
         --mount type=image,source=localhost/agentux-live:dev,dst=/rootfs \
         {{ titanoboa }}
     sudo chown "$(id -u):$(id -g)" output/live/*.iso
+    # x86_64: legacy BIOS boot too, with the live image's GRUB (as live.yml).
+    if [[ "$(uname -m)" == x86_64 ]]; then
+        grub="$(mktemp -d)"
+        sudo podman run --rm --security-opt label=disable -v "$grub:/out" localhost/agentux-live:dev \
+            sh -euc 'cp -r /usr/lib/grub/i386-pc /out/ && grub2-mkimage -O i386-pc-eltorito -d /usr/lib/grub/i386-pc -o /out/eltorito.img -p /boot/grub2 iso9660 biosdisk'
+        sudo chown -R "$(id -u):$(id -g)" "$grub"
+        for iso in output/live/*.iso; do
+            live/bios-iso.sh "$iso" "$iso.bios" "$grub" && mv "$iso.bios" "$iso"
+        done
+        rm -rf "$grub"
+    fi
     ls -lh output/live/*.iso
 
-# Boot the live ISO headless in QEMU/KVM and test it like CI does (results in output/live-test; LIVE_TEST_INSTALL=0 skips the install)
+# Boot the live ISO headless in QEMU/KVM and test it like CI does (results in output/live-test; LIVE_TEST_INSTALL=0 skips the install, LIVE_TEST_FIRMWARE=bios boots SeaBIOS)
 live-test iso="":
     #!/usr/bin/env bash
     set -euo pipefail

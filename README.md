@@ -158,6 +158,19 @@ Two stronger options were left for later, since each needs every installed syste
 
 </details>
 
+## Installation profiles
+
+The image is role-neutral. The installer may seed a profile, which the first
+boot applies through `agentux-profile-apply.service`; existing installs can
+change it with `agentux profile apply <profile>`. The profiles are
+`workstation` (node plus desktop), `node` (remote execution), `command`
+(guarded Command server capability), `executive` (Office client), `complete`,
+and `custom`. See the shipped [profile guide](files/usr/share/agentux/profiles/README.md).
+
+The Command profile never layers PostgreSQL, Temporal, NATS or object storage
+into the immutable host. It requires explicit image/configuration and leaves
+the future Quadlet bundle under the Command product's ownership.
+
 ## Install
 
 ### From the ISO
@@ -200,7 +213,7 @@ What you get:
 <details>
 <summary>How the live ISO is built</summary>
 
-How it is built: [`live/Containerfile`](live/Containerfile) starts from the published image and runs [`live/build.sh`](live/build.sh), which adds everything live-only; [Titanoboa](https://github.com/ublue-os/titanoboa) (Universal Blue's live ISO builder, used for Bazzite's and Bluefin's live ISOs) squashes that image into `LiveOS/squashfs.img` and writes the ISO with its kernel, initramfs and the GRUB entries from `/usr/lib/bootc-image-builder/iso.yaml`. The live layer:
+How it is built: [`live/Containerfile`](live/Containerfile) starts from the published image and runs [`live/build.sh`](live/build.sh), which adds everything live-only; [Titanoboa](https://github.com/ublue-os/titanoboa) (Universal Blue's live ISO builder, used for Bazzite's and Bluefin's live ISOs) squashes that image into `LiveOS/squashfs.img` and writes the ISO with its kernel, initramfs and the GRUB entries from `/usr/lib/bootc-image-builder/iso.yaml`. Titanoboa's ISO boots UEFI only, so on x86_64 [`live/bios-iso.sh`](live/bios-iso.sh) then adds legacy BIOS boot the way Fedora's own media do it: GRUB's i386-pc El Torito image (made by the live image's `grub2-mkimage`) as the first boot entry, its modules in `/boot/grub2/i386-pc`, and GRUB's hybrid MBR (`boot_hybrid.img`), so a CD/DVD and a USB stick written with `dd` boot on BIOS. BIOS GRUB reads the same `/boot/grub2/grub.cfg` as the UEFI menu (same entries and kernel arguments); the EFI partition, shim (Secure Boot) and the volume label stay as Titanoboa wrote them. The live layer:
 
 - regenerates the initramfs with dracut's `dmsquash-live` (the AgentUX boot splash stays in it), boots with `rd.live.image` and SELinux permissive (the squashfs carries no labels), and mounts a larger tmpfs on `/var/tmp`;
 - adds `livesys-scripts` (the live user, autologin, Fedora's live tweaks), `anaconda-live` with an AgentUX profile and the payload in `/usr/share/agentux/live/install.ks`, and `qemu-guest-agent`;
@@ -528,7 +541,7 @@ Locally, `just boot-test` does the same with the image from `just build` (result
 <details>
 <summary>What the live ISO test checks</summary>
 
-The Live ISO workflow boots the amd64 ISO it built (on pull requests that touch `live/`, the live test or the workflow, weekly, and for every release) headless in QEMU/KVM with UEFI, from the CD, with an empty disk behind it, and talks to the live system through the QEMU guest agent the live layer ships ([`tests/live-vm.sh`](tests/live-vm.sh), which runs [`tests/live.sh`](tests/live.sh) in the VM as root):
+The Live ISO workflow boots the amd64 ISO it built (on pull requests that touch `live/`, the live test or the workflow, weekly, and for every release) headless in QEMU/KVM with UEFI, from the CD, with an empty disk behind it, and again in a second job with legacy BIOS (QEMU's SeaBIOS, `LIVE_TEST_FIRMWARE=bios`): first as a USB stick written with `dd` up to the live session, then the whole test below from the CD, the install on a BIOS machine (the installed disk must have a BIOS boot partition and GRUB in its MBR) and the installed disk's first boot with BIOS, and talks to the live system through the QEMU guest agent the live layer ships ([`tests/live-vm.sh`](tests/live-vm.sh), which runs [`tests/live.sh`](tests/live.sh) in the VM as root):
 
 - it waits for the live user's autologin session, then checks that the system booted live (`rd.live.image`, the overlay root), that `kwin_wayland`, `plasmashell` and `agentux-cockpit` run for `liveuser` with the AgentUX look-and-feel, that `agentuxd` runs with `--fake-agents` and `aux ps` answers with the demo's runs (one waiting for approval), and that neither first-login nor the Antigravity ACP server unit is enabled or ran; the installer launchers, the panel pin and Anaconda's payload are checked too but only warn;
 - screenshots: the desktop after login and a minute later, the demo after the test approves its waiting run, and the installer opened through **Install AgentUX**; plus a screendump every 2 seconds of the first two minutes (GRUB and the boot splash, `boot/` in the artifact);
@@ -548,7 +561,7 @@ The Build ISO workflow installs the x86_64 installer ISO it built before anythin
 - it reads the ISO's own boot entry (`EFI/BOOT/grub.cfg`) and kickstart (`inst.ks=`, with what it `%include`s) and checks the kickstart installs the embedded image (`ostreecontainer`) and switches the installed system to the channel the ISO was built for (`ghcr.io/agentux-os/agentux:latest`, or `:stable` for a release);
 - it makes that kickstart unattended: the ISO's lines stay as they are, minus the UI mode, plus the answers the installer's UI would get (language, time zone, the whole disk), a `boottest` user with a throwaway SSH key and password, sshd enabled, and `poweroff`;
 - it boots the ISO's kernel and initrd under QEMU/KVM with UEFI and the ISO's own command line, with `inst.ks=` pointed at that kickstart on a small second CD (GRUB's menu is interactive, so it is the only part bypassed; stage 2 and the payload come from the ISO), and waits for the install to power the VM off;
-- it checks the AgentUX branding: the volume label, the boot menu's names (no Fedora, no "44") and the `images/product.img` (`.buildstamp` with `Product=AgentUX`, the stylesheet, the art), then boots the ISO the way a person does (UEFI firmware, the ISO's GRUB, its default entry) and screendumps the boot menu and the graphical installer once it is drawn (`look/01-boot-menu.png`, `look/02-installer.png` in the test artifact); [`tests/installer-look.py`](tests/installer-look.py) fails the test if Anaconda wears Fedora's blue (or Anaconda's default) instead of AgentUX's Ink panels and Lime mark;
+- it checks the AgentUX branding: the volume label, the boot menu's names (no Fedora, no "44") and the `images/product.img` (`.buildstamp` with `Product=AgentUX`, the stylesheet, the art), then boots the ISO the way a person does (UEFI firmware, the ISO's GRUB, its default entry) and screendumps the boot menu and the graphical installer once it is drawn (`look/01-boot-menu.png`, `look/02-installer.png` in the test artifact); [`tests/installer-look.py`](tests/installer-look.py) fails the test if Anaconda wears Fedora's blue (or Anaconda's default) instead of AgentUX's Ink panels and Lime mark; the same boot with legacy BIOS (SeaBIOS, no OVMF) must reach the installer as well (`look-bios/`), since `installer/brand-iso.sh` rewrites the ISO and must keep bootc-image-builder's BIOS boot image and hybrid MBR;
 - then it boots the installed disk alone and runs [`tests/boot.sh`](tests/boot.sh)'s `installed` checks over SSH ([`tests/boot-vm.sh`](tests/boot-vm.sh) with `BOOT_TEST_PHASE=installed`): `bootc` booted the channel's image from the registry, the signature policy requires the AgentUX key for both repositories (key and `registries.d` in place), `/etc/fstab` has no entry for `/`, the system reached `running` with no failed units, and the display manager runs.
 
 This test found that Anaconda installs (installer and live ISO alike) started degraded: Anaconda writes the btrfs root with its mount options into `/etc/fstab`, and `systemd-remount-fs` cannot apply them to the composefs root (`overlay: No changes allowed in reconfigure`). bootc's own installer writes no root entry, so both kickstarts (`disk_config/iso.toml` and `live/install.ks`) comment it out in `%post`, and the live test checks the installed `fstab` too.

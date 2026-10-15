@@ -232,7 +232,7 @@ jobs:
         if: steps.kvm.outputs.ok == 'true'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils ovmf xorriso cpio
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils ovmf seabios xorriso cpio
           # Room for the VM's disk; the images are not needed anymore.
           sudo podman rmi --all --force >/dev/null || true
           sudo rm -rf output
@@ -263,6 +263,9 @@ jobs:
             iso-test/look/*.png
             iso-test/look/*.txt
             iso-test/look/*.log
+            iso-test/look-bios/*.png
+            iso-test/look-bios/*.txt
+            iso-test/look-bios/*.log
             iso-test/boot/*.png
             iso-test/boot/*.log
             iso-test/boot/*.txt
