@@ -120,6 +120,18 @@ jobs:
         run: |
           echo "$TOKEN" | sudo podman login ghcr.io --username "${{ github.actor }}" --password-stdin
           sudo .github/scripts/pull.sh "$IMAGE"
+          # bootc-image-builder resolves a digest reference to the
+          # architecture's image and does not find that in local storage
+          # (release.yml passes the multi-arch list's digest), and the booted
+          # system names the reference it was installed from. So a digest is
+          # tagged locally as the channel a release follows, :stable, and
+          # that tag is what gets installed and checked.
+          if [[ $IMAGE == *@sha256:* ]]; then
+            ref="${IMAGE%@*}:stable"
+            sudo podman tag "$(sudo podman image inspect --format '{{.Id}}' "$IMAGE")" "$ref"
+            echo "IMAGE=$ref" >> "$GITHUB_ENV"
+            echo "testing $IMAGE as $ref"
+          fi
 
       - name: Build qcow2
         if: steps.kvm.outputs.ok == 'true'
