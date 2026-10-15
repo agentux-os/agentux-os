@@ -234,6 +234,8 @@ check_os_release() {
 # What people see as the version is AgentUX's (ADR 0012): the build's date in
 # os-release, the boot menu and hostnamectl; the release and channel from the
 # booted image (agentux-version, KDE's About page); Fedora only as the base.
+# The inner bash expands the variables.
+# shellcheck disable=SC2016
 check_version() {
     echo "== version"
     local f=/etc/os-release
