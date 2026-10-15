@@ -18,7 +18,8 @@
   <a href="#verifying-the-image"><img alt="Signed with cosign" src="https://img.shields.io/badge/images-cosign%20signed-4f7d0b?labelColor=0b0d10"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/agentux-os/agentux-os?labelColor=0b0d10&color=4f7d0b"></a>
   <a href="https://agentuxos.org"><img alt="Website" src="https://img.shields.io/badge/website-agentuxos.org-c6f36b?labelColor=0b0d10"></a>
-  <a href="https://download.agentuxos.org"><img alt="Download" src="https://img.shields.io/badge/download-ISO-c6f36b?labelColor=0b0d10"></a>
+  <a href="https://github.com/agentux-os/agentux-os/releases"><img alt="Release" src="https://img.shields.io/github/v/release/agentux-os/agentux-os?include_prereleases&label=release&labelColor=0b0d10&color=4f7d0b"></a>
+  <a href="https://agentuxos.org/download/"><img alt="Download" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdownload.agentuxos.org%2Flatest.json&query=%24.version&label=download&labelColor=0b0d10&color=c6f36b&cacheSeconds=3600"></a>
 </p>
 
 <p align="center">
@@ -93,7 +94,7 @@ Each image repository has two channels, and an installed system follows exactly 
 | Tag | Channel | Moves |
 |---|---|---|
 | `:stable` | **Stable**: the newest release | When the owner approves a `v*` tag, to that tag's image |
-| `:v<version>` (e.g. `:v0.5.0`) | One release | Never: set once, when its release is approved |
+| `:v<version>` (e.g. `:v0.5.5`) | One release | Never: set once, when its release is approved |
 | `:latest` | **Nightly** (testing): `main`, rebuilt daily for Fedora's updates | Every day, and on every merge to `main` |
 | `:<YYYYMMDD>` | One nightly build | Never |
 
@@ -247,21 +248,21 @@ sha256sum --check --ignore-missing SHA256SUMS
 
 ```json
 {
-  "version": "v0.5.0",
+  "version": "v0.5.5",
   "date": "2026-10-20T12:00:00Z",
   "channel": "stable",
-  "release_notes": "https://github.com/agentux-os/agentux-os/releases/tag/v0.5.0",
-  "sha256sums": "https://download.agentuxos.org/iso/v0.5.0/SHA256SUMS",
-  "sha256sums_signature": "https://download.agentuxos.org/iso/v0.5.0/SHA256SUMS.sigstore.json",
+  "release_notes": "https://github.com/agentux-os/agentux-os/releases/tag/v0.5.5",
+  "sha256sums": "https://download.agentuxos.org/iso/v0.5.5/SHA256SUMS",
+  "sha256sums_signature": "https://download.agentuxos.org/iso/v0.5.5/SHA256SUMS.sigstore.json",
   "public_key": "https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub",
   "images": {
-    "plasma": {"ref": "ghcr.io/agentux-os/agentux:v0.5.0", "channel": "ghcr.io/agentux-os/agentux:stable", "digest": "sha256:..."},
-    "hyprland": {"ref": "ghcr.io/agentux-os/agentux-hyprland:v0.5.0", "channel": "ghcr.io/agentux-os/agentux-hyprland:stable", "digest": "sha256:..."}
+    "plasma": {"ref": "ghcr.io/agentux-os/agentux:v0.5.5", "channel": "ghcr.io/agentux-os/agentux:stable", "digest": "sha256:..."},
+    "hyprland": {"ref": "ghcr.io/agentux-os/agentux-hyprland:v0.5.5", "channel": "ghcr.io/agentux-os/agentux-hyprland:stable", "digest": "sha256:..."}
   },
   "isos": [
     {
-      "name": "agentux-live-v0.5.0-x86_64.iso",
-      "url": "https://download.agentuxos.org/iso/v0.5.0/agentux-live-v0.5.0-x86_64.iso",
+      "name": "agentux-live-v0.5.5-x86_64.iso",
+      "url": "https://download.agentuxos.org/iso/v0.5.5/agentux-live-v0.5.5-x86_64.iso",
       "stable_url": "https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso",
       "size": 3712345678,
       "sha256": "...",
