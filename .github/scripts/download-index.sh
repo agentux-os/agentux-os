@@ -11,7 +11,12 @@
 set -euo pipefail
 
 bucket=agentux-downloads
-s3() { aws s3 --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" --only-show-errors "$@"; }
+# --only-show-errors is an option of cp, not of ls (which rejects it).
+s3() {
+    local quiet=(--only-show-errors)
+    [[ $1 == ls ]] && quiet=()
+    aws s3 --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" "${quiet[@]}" "$@"
+}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
