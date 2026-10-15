@@ -31,7 +31,7 @@ grep -q '"components":\["desktop","node"\]' <<<"$custom"
 
 bash "$here/files/usr/bin/agentux" profile apply workstation >/dev/null
 test -s "$AGENTUX_PROFILE_STATE"
-grep -q '"applied":\["node","desktop"\]' "$AGENTUX_PROFILE_STATE"
+jq -e '.applied | sort == ["desktop","node"]' "$AGENTUX_PROFILE_STATE" >/dev/null
 
 before="$(sha256sum "$AGENTUX_PROFILE_STATE")"
 bash "$here/files/usr/bin/agentux" profile apply workstation >/dev/null
@@ -49,7 +49,7 @@ if bash "$here/files/usr/bin/agentux" profile apply command >/dev/null 2>&1; the
     exit 1
 fi
 grep -q '"status":"failed"' "$AGENTUX_PROFILE_STATE"
-grep -q '"applied":\["node","desktop"\]' "$AGENTUX_PROFILE_STATE"
+jq -e '.applied | sort == ["desktop","node"]' "$AGENTUX_PROFILE_STATE" >/dev/null
 
 bash "$here/files/usr/bin/agentux" profile seed node
 test -s "$tmp/state/profile-intent.json"
