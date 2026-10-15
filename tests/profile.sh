@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-trap 'echo "profile tests failed at line $LINENO" >&2' ERR
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+cleanup() {
+    rc=$?
+    if (( rc != 0 )); then
+        echo "profile tests failed (exit $rc)" >&2
+    fi
+    rm -rf "$tmp"
+    exit "$rc"
+}
+trap cleanup EXIT
 
 export AGENTUX_PROFILE_ROOT="$tmp/root"
 export AGENTUX_PROFILE_STATE="$tmp/state/profile.json"
@@ -41,7 +48,8 @@ if bash "$here/files/usr/bin/agentux" profile apply command >/dev/null 2>&1; the
     echo "unconfigured Command profile was accepted" >&2
     exit 1
 fi
-test "$before" = "$(sha256sum "$AGENTUX_PROFILE_STATE")"
+grep -q '"status":"failed"' "$AGENTUX_PROFILE_STATE"
+grep -q '"applied":\["node","desktop"\]' "$AGENTUX_PROFILE_STATE"
 
 bash "$here/files/usr/bin/agentux" profile seed node
 test -s "$tmp/state/profile-intent.json"
