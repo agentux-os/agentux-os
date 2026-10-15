@@ -1,0 +1,22 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+image="${AGENTUX_COMMAND_IMAGE:-}"
+config="${AGENTUX_COMMAND_CONFIG:-/etc/agentux/command/config.env}"
+
+if [[ -z "$image" ]]; then
+    echo "agentux: Command profile requires AGENTUX_COMMAND_IMAGE" >&2
+    exit 1
+fi
+if [[ ! -r "$config" ]]; then
+    echo "agentux: Command profile requires configuration: $config" >&2
+    exit 1
+fi
+
+# The actual Command Quadlet bundle is owned by agentux-command. This guard
+# establishes the OS boundary without shipping a service that has no image,
+# migrations, health checks or backup policy yet.
+install -d -m 0755 /etc/containers/systemd/agentux-command
+printf '%s\n' "$image" >/etc/containers/systemd/agentux-command/image
+printf '%s\n' "$config" >/etc/containers/systemd/agentux-command/config
+echo "agentux: Command configuration accepted; service bundle is not enabled by this OS release" >&2
