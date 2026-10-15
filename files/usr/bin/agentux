@@ -21,7 +21,10 @@ profile_cmd() {
     [[ -r "$catalog" ]] || die "profile catalog not found: $catalog"
     jq -e '.catalogVersion and (.profiles | type == "object") and (.components | type == "object")' \
         "$catalog" >/dev/null || die "invalid profile catalog: $catalog"
-    local action="${1:-}" value="${2:-}" components_arg=""
+    local action value components_arg
+    action="${1:-}"
+    value="${2:-}"
+    components_arg=""
     [[ -n "$action" ]] || usage
     if [[ "$action" != show && "$action" != apply-intent && -z "$value" ]]; then
         usage
@@ -79,7 +82,8 @@ profile_cmd() {
             jq -e --arg profile "$value" '.profiles[$profile]' "$catalog" >/dev/null \
                 || die "unknown profile: $value"
             mkdir -p "$(dirname "$state")"
-            local intent="$(dirname "$state")/profile-intent.json" tmp
+            local intent tmp
+            intent="$(dirname "$state")/profile-intent.json"
             tmp="$(mktemp "${intent}.XXXXXX")"
             jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
                 --arg profile "$value" \
@@ -87,7 +91,8 @@ profile_cmd() {
             mv -f "$tmp" "$intent"
             ;;
         apply-intent)
-            local intent="$(dirname "$state")/profile-intent.json" profile
+            local intent profile
+            intent="$(dirname "$state")/profile-intent.json"
             [[ -r "$intent" ]] || exit 0
             profile="$(jq -er '.profile' "$intent")" || die "invalid profile intent: $intent"
             profile_cmd apply "$profile" >/dev/null
