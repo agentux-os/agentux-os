@@ -4,14 +4,14 @@
 # the Fedora installer launcher on the desktop) and before it hands
 # /home/liveuser to the live user.
 
-# The AgentUX launchers replace Fedora's "Install to Hard Drive".
+# "Install AgentUX" replaces Fedora's "Install to Hard Drive" and is the only
+# icon on the desktop. "Try the agent CLIs in this session" (temporary, into
+# RAM) is in the application menu only, so the desktop never offers two
+# different "Install" icons.
 rm -f /home/liveuser/Desktop/liveinst.desktop \
     /home/liveuser/.local/share/applications/liveinst.desktop
 mkdir -p /home/liveuser/Desktop
-for _agentux_app in agentux-live-install agentux-live-agent-clis; do
-    install -m 0755 "/usr/share/applications/$_agentux_app.desktop" /home/liveuser/Desktop/
-done
-unset _agentux_app
+install -m 0755 /usr/share/applications/agentux-live-install.desktop /home/liveuser/Desktop/
 if [ -f /home/liveuser/.config/kickoffrc ]; then
     sed -i 's|/usr/share/applications/liveinst.desktop|/usr/share/applications/agentux-live-install.desktop|' \
         /home/liveuser/.config/kickoffrc

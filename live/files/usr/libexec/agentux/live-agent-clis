@@ -1,10 +1,12 @@
 #!/usr/bin/bash
-# AgentUX live session only: "Install the agent CLIs". On an installed system
+# AgentUX live session only: "Try the agent CLIs in this session" (in the
+# application menu, not on the desktop). On an installed system
 # agentux-first-login.service installs Claude Code, Codex, OpenCode,
 # Antigravity CLI, their ACP adapters and the dev tools at the first login.
 # The live session does not start it at login: the downloads would land in
-# RAM (the live root is a tmpfs overlay). This starts it on request; it still
-# skips Antigravity's ~1 GB ACP server, which never runs live.
+# RAM (the live root is a tmpfs overlay) and are gone at reboot. This starts
+# it on request; it still skips Antigravity's ~1 GB ACP server, which never
+# runs live.
 set -uo pipefail
 
 notify() {
@@ -12,13 +14,13 @@ notify() {
 }
 
 if systemctl --user is-active -q agentux-first-login.service; then
-    notify "Agent CLIs" "Already installing; see: journalctl --user -u agentux-first-login"
+    notify "Agent CLIs" "Already downloading; see: journalctl --user -u agentux-first-login"
     exit 0
 fi
-notify "Installing the agent CLIs" "Claude Code, Codex, OpenCode and Antigravity CLI (several hundred MB, kept in RAM). This takes a few minutes."
+notify "Downloading the agent CLIs into this session" "Claude Code, Codex, OpenCode and Antigravity CLI (several hundred MB) go into RAM and are gone when you reboot; an installed AgentUX installs them at first login. This takes a few minutes."
 if systemctl --user start agentux-first-login.service; then
-    notify "Agent CLIs installed" "Log in to a vendor in a terminal (e.g. claude, codex) to use it. The demo keeps using fake agents."
+    notify "Agent CLIs ready for this session" "Log in to a vendor in a terminal (e.g. claude, codex) to use it. The demo keeps using fake agents."
 else
-    notify --urgency=critical "Installing the agent CLIs failed" "See: journalctl --user -u agentux-first-login"
+    notify --urgency=critical "Downloading the agent CLIs failed" "See: journalctl --user -u agentux-first-login"
     exit 1
 fi
