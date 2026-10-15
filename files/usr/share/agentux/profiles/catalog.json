@@ -1,0 +1,36 @@
+{
+  "catalogVersion": 1,
+  "profiles": {
+    "workstation": {
+      "label": "AgentUX Workstation",
+      "components": ["node", "desktop"]
+    },
+    "node": {
+      "label": "AgentUX Node",
+      "components": ["node", "node-gateway"]
+    },
+    "command": {
+      "label": "AgentUX Command Server",
+      "components": ["command-server"]
+    },
+    "executive": {
+      "label": "AgentUX Executive",
+      "components": ["office-client"]
+    },
+    "complete": {
+      "label": "AgentUX Complete",
+      "components": ["node", "desktop", "command-server", "office-client"]
+    },
+    "custom": {
+      "label": "Custom",
+      "components": []
+    }
+  },
+  "components": {
+    "node": {"label": "Local AgentUX node", "providedBy": "agentux-os"},
+    "desktop": {"label": "Desktop cockpit", "providedBy": "agentux-desktop"},
+    "node-gateway": {"label": "Remote node gateway", "providedBy": "agentux-os"},
+    "command-server": {"label": "AgentUX Command server", "providedBy": "agentux-command"},
+    "office-client": {"label": "AgentUX Office web client", "providedBy": "agentux-apps"}
+  }
+}
