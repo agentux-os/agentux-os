@@ -150,7 +150,17 @@ phase_checks() {
     echo "== installer (warnings only)"
     local desktop="/var/home/$user/Desktop"
     if [[ -e "$desktop/agentux-live-install.desktop" ]]; then ok "Install AgentUX on the desktop"; else warn "no Install AgentUX launcher on the desktop"; find "$desktop" -maxdepth 1 2>&1 | indent; fi
-    if [[ -e "$desktop/agentux-live-agent-clis.desktop" ]]; then ok "Install the agent CLIs on the desktop"; else warn "no agent CLIs launcher on the desktop"; fi
+    # One "Install" icon on the desktop: Install AgentUX. The agent CLIs'
+    # launcher (temporary, into RAM) is in the application menu only.
+    local icons
+    icons="$(find "$desktop" -maxdepth 1 -name '*.desktop' -printf '%f\n' 2>/dev/null | sort | paste -sd ' ')"
+    if [[ "$icons" == agentux-live-install.desktop ]]; then ok "Install AgentUX is the only desktop icon"; else warn "desktop icons: '$icons', expected only agentux-live-install.desktop"; fi
+    local clis=/usr/share/applications/agentux-live-agent-clis.desktop
+    if grep -qx 'Name=Try the agent CLIs in this session' "$clis" && grep -q '^Comment=.*(RAM).*reboot' "$clis"; then
+        ok "\"Try the agent CLIs in this session\" in the application menu (says RAM, gone on reboot)"
+    else
+        warn "the agent CLIs' menu launcher is not \"Try the agent CLIs in this session\" with its RAM note"; indent <"$clis"
+    fi
     if [[ ! -e "$desktop/liveinst.desktop" ]]; then ok "Fedora's installer launcher replaced"; else warn "Fedora's liveinst.desktop is still on the desktop"; fi
     if grep -q 'agentux-live-install.desktop' "/var/home/$user/.config/plasma-org.kde.plasma.desktop-appletsrc" 2>/dev/null; then
         ok "Install AgentUX pinned in the panel"

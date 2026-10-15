@@ -11,7 +11,8 @@
 #   - livesys-scripts: a passwordless `liveuser` logged in automatically
 #     into Plasma (or AgentUX Hyprland), with Fedora's live tweaks;
 #   - no ~1 GB of downloads into RAM at login: the agent CLIs' first-login
-#     unit is not started at login but on demand (a desktop launcher), and
+#     unit is not started at login but on demand ("Try the agent CLIs in
+#     this session" in the application menu), and
 #     the Antigravity ACP server is skipped altogether;
 #   - a demo: agentuxd with --fake-agents and a sample project whose runs
 #     the cockpit shows moving, explained by a note on the desktop;
@@ -148,8 +149,9 @@ systemctl enable livesys.service livesys-late.service
 # done at boot; this keeps plasma-setup from starting before that.)
 touch /etc/plasma-setup-done
 
-# Login-time downloads: none. The agent CLIs install on demand ("Install the
-# agent CLIs" on the desktop starts the unit); the Antigravity ACP server
+# Login-time downloads: none. The agent CLIs install on demand, into RAM
+# ("Try the agent CLIs in this session" in the application menu starts the
+# unit); the Antigravity ACP server
 # (~1 GB unpacked) never runs live, see its drop-in.
 systemctl --global disable agentux-first-login.service agentux-antigravity-acp.service
 # Nothing to update or mark on a live medium: bootupd's boot-time update

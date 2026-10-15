@@ -1,9 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=Install the agent CLIs
-Comment=Download Claude Code, Codex, OpenCode and Antigravity CLI into this live session (kept in RAM)
+Name=Try the agent CLIs in this session
+GenericName=Temporary agent CLIs (live session only)
+Comment=Downloads Claude Code, Codex, OpenCode and Antigravity CLI into this live session's memory (RAM). They are gone when you reboot; an installed AgentUX installs them automatically at first login.
 Exec=/usr/libexec/agentux/live-agent-clis
 Icon=download
 Terminal=false
-Categories=System;
+Categories=Development;
+Keywords=agent;cli;claude;codex;opencode;antigravity;live;temporary;
 StartupNotify=false
