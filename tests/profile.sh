@@ -6,7 +6,7 @@ tmp="$(mktemp -d)"
 cleanup() {
     rc=$?
     if (( rc != 0 )); then
-        echo "profile tests failed (exit $rc)" >&2
+        echo "profile tests failed (exit $rc, last command: ${BASH_COMMAND})" >&2
     fi
     rm -rf "$tmp"
     exit "$rc"
