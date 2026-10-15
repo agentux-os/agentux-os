@@ -153,6 +153,9 @@ RUN --mount=type=bind,source=variants,target=/tmp/variants \
 # files/.
 ARG AGENTUX_VERSION=""
 ARG AGENTUX_COMMIT=""
+# The pipes only feed printf into grep and sed (no failure to hide), and
+# VERSION is os-release's, read in a subshell.
+# hadolint ignore=DL4006,SC2153
 RUN version="${AGENTUX_VERSION:-$(date -u +%Y.%m.%d)}" \
     && printf '%s\n' "$version" | grep -Eqx '[0-9a-z._-]+' \
     && date="$(printf '%s\n' "$version" | sed -nE 's/^([0-9]{4}\.[0-9]{2}\.[0-9]{2})(\.[0-9a-f]+)?$/\1/p')" \
