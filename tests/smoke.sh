@@ -177,10 +177,13 @@ assert "os-release HOME_URL is agentuxos.org" bash -c '. /etc/os-release && test
 # shellcheck disable=SC2016
 assert "/etc/system-release names AgentUX (bootupd's firmware boot entry)" \
     bash -c '. /etc/os-release && test "$(cat /etc/system-release)" = "AgentUX release $VERSION" && cat /etc/system-release'
+# shellcheck disable=SC2016
 assert "agentux-version --json" \
     bash -c 'agentux-version --json | jq -e --arg v "$(. /etc/os-release && echo "$IMAGE_VERSION")" ".name == \"AgentUX\" and .image_version == \$v and (.base | startswith(\"Fedora Linux \")) and (.summary | length > 0)" >/dev/null && agentux-version | head -n2 | tr "\n" " "'
+# shellcheck disable=SC2016
 assert "About page: the release line (about-release, two lines)" \
     bash -c 'out="$(/usr/libexec/agentux/about-release)" && test "$(wc -l <<<"$out")" -ge 2 && test "$(head -n1 <<<"$out")" = Release: && sed -n 2p <<<"$out"'
+# shellcheck disable=SC2016
 assert "About page: the base line (about-base, two lines)" \
     bash -c 'out="$(/usr/libexec/agentux/about-base)" && test "$(head -n1 <<<"$out")" = "Based on:" && sed -n 2p <<<"$out"'
 assert "kcm-about-distrorc runs both About scripts" \
