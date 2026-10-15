@@ -212,7 +212,11 @@ EOF
 # deployment tracking it like any other install.
 sed -e "s|@INSTALL_IMAGE@|$install_image|g" -e "s|@TRACK_IMAGE@|$track_image|g" \
     "$src/install.ks" >/usr/share/agentux/live/install.ks
-if grep -q '@' /usr/share/agentux/live/install.ks; then exit 1; fi
+# Every @PLACEHOLDER@ replaced (a digest's @sha256: is not one).
+if grep -qE '@[A-Z_]+@' /usr/share/agentux/live/install.ks; then
+    echo "unreplaced placeholder in install.ks" >&2
+    exit 1
+fi
 test -f /usr/share/anaconda/interactive-defaults.ks
 cat >>/usr/share/anaconda/interactive-defaults.ks <<'EOF'
 
