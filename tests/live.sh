@@ -12,7 +12,8 @@
 #   install   install to the VM's disk (/dev/vda) with Anaconda from the live
 #             system, unattended, with the live installer's own payload
 #             (/usr/share/agentux/live/install.ks)
-#   verify    look at the installed system on /dev/vda: its deployment tracks
+#   verify    look at the installed system on /dev/vda: its boot loader for
+#             the firmware it was installed on (LIVE_FIRMWARE), its deployment tracks
 #             the channel (LIVE_TRACK_IMAGE) and carries nothing from the live
 #             system
 #
@@ -332,6 +333,33 @@ phase_verify() {
         bad "/etc/fstab mounts / (systemd-remount-fs would fail)"
         indent <"$deploy/etc/fstab" 2>/dev/null
     fi
+    # The boot loader for the firmware the install ran on (LIVE_FIRMWARE, set
+    # by live-vm.sh): on BIOS, Anaconda's autopart adds a BIOS boot partition
+    # to the GPT and bootupd puts GRUB's i386-pc core there and its boot code
+    # in the MBR; on UEFI, an EFI system partition with shim.
+    local parts
+    parts="$(sfdisk --dump "$target" 2>&1)"
+    case "${LIVE_FIRMWARE:-}" in
+        bios)
+            if grep -qi '21686148-6449-6e6f-744e-656564454649' <<<"$parts"; then
+                ok "BIOS boot partition on $target"
+            else
+                bad "no BIOS boot partition on $target"; indent <<<"$parts"
+            fi
+            if head -c 440 "$target" | grep -aq GRUB; then
+                ok "GRUB's boot code in $target's MBR (bootupd's BIOS install)"
+            else
+                bad "no GRUB boot code in $target's MBR"
+            fi
+            ;;
+        uefi)
+            if grep -qi 'c12a7328-f81f-11d2-ba4b-00a0c93ec93b' <<<"$parts"; then
+                ok "EFI system partition on $target"
+            else
+                bad "no EFI system partition on $target"; indent <<<"$parts"
+            fi
+            ;;
+    esac
     if jq -e '.transports.docker["ghcr.io/agentux-os/agentux"][0].type == "sigstoreSigned"' "$deploy/etc/containers/policy.json" >/dev/null 2>&1; then
         ok "signature policy requires the AgentUX key"
     else
