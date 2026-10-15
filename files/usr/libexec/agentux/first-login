@@ -58,23 +58,26 @@ fetch() {
 # run_installer URL [ARGS...]: downloads a vendor's install script and runs
 # it. Unlike `curl | bash`, a body that is not a script (an error page, or a
 # compressed body served without Content-Encoding, as antigravity.google did
-# once) is retried instead of executed.
+# once) is retried instead of executed. A script that fails is run again too:
+# the installers are idempotent, and they fail on transient errors of their
+# own (opencode.ai's "Failed to fetch version information" when GitHub's API
+# rate-limits the address).
 run_installer() {
-    local url="$1" script attempt
+    local url="$1" script attempt rc=1
     shift
     script="$(mktemp)" || return 1
     for attempt in 1 2 3; do
         if fetch "$url" "$script" 120 && [[ "$(head -c 2 "$script")" == '#!' ]]; then
-            bash "$script" "$@"
-            local rc=$?
-            rm -f "$script"
-            return "$rc"
+            bash "$script" "$@" && { rm -f "$script"; return 0; }
+            rc=$?
+            echo "agentux: $url failed with exit $rc (attempt $attempt)" >&2
+        else
+            echo "agentux: $url did not return a shell script (attempt $attempt)" >&2
         fi
-        echo "agentux: $url did not return a shell script (attempt $attempt)" >&2
-        sleep 5
+        [[ $attempt == 3 ]] || sleep $((attempt * 10))
     done
     rm -f "$script"
-    return 1
+    return "$rc"
 }
 
 install_claude() {

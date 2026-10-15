@@ -14,6 +14,13 @@ on:
       image:
         description: Image to boot instead of building this ref (e.g. ghcr.io/agentux-os/agentux:latest)
         default: ""
+  # release.yml boots the exact digest it is about to promote.
+  workflow_call:
+    inputs:
+      image:
+        description: Image to boot (a digest reference)
+        type: string
+        required: true
   schedule:
     - cron: "0 8 * * *" # after the nightly image build
   pull_request:

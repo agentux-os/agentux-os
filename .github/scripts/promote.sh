@@ -22,7 +22,9 @@ shift 2
 (( $# > 0 )) || { echo "usage: promote.sh REPOSITORY DIGEST TAG..." >&2; exit 2; }
 [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::not a digest: $digest"; exit 1; }
 key=files/etc/pki/containers/agentux-os.pub
-identity="https://github.com/${GITHUB_REPOSITORY:?}/.github/workflows/build.yml@${GITHUB_REF:?}"
+# A release promotes main's image (release.yml), so the keyless signature
+# must come from build.yml on main.
+identity="https://github.com/${GITHUB_REPOSITORY:?}/.github/workflows/build.yml@refs/heads/main"
 
 verify() {
     cosign verify --key "$key" "$1" >/dev/null
