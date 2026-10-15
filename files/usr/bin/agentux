@@ -140,7 +140,6 @@ profile_cmd() {
             remaining="$(jq -c --arg component "$component" 'map(select(. != $component))' <<<"$applied")"
             write_state "$(jq -r '.requested // "custom"' "$state")" "$remaining" '[]' '[]' applied
             ;;
-            ;;
         *) usage ;;
     esac
 }
