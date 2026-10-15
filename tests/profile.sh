@@ -48,4 +48,18 @@ bash "$here/files/usr/bin/agentux" profile apply-intent >/dev/null
 test ! -e "$tmp/state/profile-intent.json"
 grep -q '"requested":"node"' "$AGENTUX_PROFILE_STATE"
 
+if bash "$here/files/usr/bin/agentux" profile apply command >/dev/null 2>"$tmp/command-error"; then
+    echo "unconfigured Command profile was accepted" >&2
+    exit 1
+fi
+grep -q '"status":"failed"' "$AGENTUX_PROFILE_STATE"
+grep -q 'command-server' "$AGENTUX_PROFILE_STATE"
+
+if bash "$here/files/usr/bin/agentux" profile apply workstation >/dev/null 2>&1; then
+    if bash "$here/files/usr/bin/agentux" profile remove node >/dev/null 2>&1; then
+        echo "node removal was accepted while desktop depends on it" >&2
+        exit 1
+    fi
+fi
+
 echo "profile tests passed"

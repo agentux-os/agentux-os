@@ -16,6 +16,20 @@ EOF
     exit 2
 }
 
+write_state() {
+    local profile="$1" applied="$2" pending="$3" failed="$4" status="$5"
+    mkdir -p "$(dirname "$state")"
+    local tmp
+    tmp="$(mktemp "${state}.XXXXXX")"
+    jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
+        --arg profile "$profile" --argjson applied "$applied" \
+        --argjson pending "$pending" --argjson failed "$failed" \
+        --arg status "$status" \
+        '{catalogVersion:$version,requested:(if $profile == "" then null else $profile end),status:$status,applied:$applied,pending:$pending,failed:$failed}' \
+        >"$tmp"
+    mv -f "$tmp" "$state"
+}
+
 profile_cmd() {
     need_jq
     [[ -r "$catalog" ]] || die "profile catalog not found: $catalog"
@@ -41,7 +55,7 @@ profile_cmd() {
                 jq -c . "$state"
             else
                 jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
-                    '{catalogVersion:$version,requested:null,applied:[],pending:[],failed:[]}'
+                    '{catalogVersion:$version,requested:null,status:"unconfigured",applied:[],pending:[],failed:[]}'
             fi
             ;;
         plan|apply)
@@ -60,22 +74,24 @@ profile_cmd() {
                 components="$(jq -c --arg profile "$value" \
                     '.profiles[$profile].components | unique' "$catalog")"
             fi
-            if [[ "$action" == apply && "$(jq -r 'index("command-server") // empty' <<<"$components")" != "" ]]; then
-                [[ -x /usr/libexec/agentux/profile-command ]] \
-                    || die "Command profile support is unavailable"
-                /usr/libexec/agentux/profile-command
-            fi
             jq -cn --arg profile "$value" --argjson components "$components" \
                 '{profile:$profile,components:$components}'
             if [[ "$action" == apply ]]; then
-                mkdir -p "$(dirname "$state")"
-                local tmp
-                tmp="$(mktemp "${state}.XXXXXX")"
-                jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
-                    --arg profile "$value" --argjson applied "$components" \
-                    '{catalogVersion:$version,requested:$profile,applied:$applied,pending:[],failed:[]}' \
-                    >"$tmp"
-                mv -f "$tmp" "$state"
+                local previous_applied error failed
+                previous_applied='[]'
+                [[ -r "$state" ]] && previous_applied="$(jq -c '.applied // []' "$state")"
+                write_state "$value" "$previous_applied" "$components" '[]' pending
+                if [[ "$(jq -r 'index("command-server") // empty' <<<"$components")" != "" ]]; then
+                    [[ -x /usr/libexec/agentux/profile-command ]] \
+                        || die "Command profile support is unavailable"
+                    if ! error="$('/usr/libexec/agentux/profile-command' 2>&1)"; then
+                        failed="$(jq -cn --arg error "$error" '[{component:"command-server",error:$error}]')"
+                        write_state "$value" "$previous_applied" "$components" "$failed" failed
+                        printf '%s\n' "$error" >&2
+                        return 1
+                    fi
+                fi
+                write_state "$value" "$components" '[]' '[]' applied
             fi
             ;;
         seed)
@@ -99,7 +115,31 @@ profile_cmd() {
             rm -f "$intent"
             ;;
         remove)
-            die "removing capabilities is not implemented yet; use profile apply"
+            local component applied dependents remaining
+            component="$value"
+            [[ -n "$component" ]] || usage
+            [[ -r "$state" ]] || die "no active profile"
+            applied="$(jq -c '.applied // []' "$state")"
+            jq -e --arg component "$component" 'index($component) != null' <<<"$applied" >/dev/null \
+                || die "component is not applied: $component"
+            case "$component" in
+                node)
+                    dependents="desktop,node-gateway"
+                    ;;
+                command-server)
+                    die "command-server removal requires operator teardown; data is never deleted implicitly"
+                    ;;
+                *)
+                    dependents=""
+                    ;;
+            esac
+            for dependent in ${dependents//,/ }; do
+                jq -e --arg component "$dependent" 'index($component) != null' <<<"$applied" >/dev/null \
+                    && die "cannot remove $component while $dependent depends on it"
+            done
+            remaining="$(jq -c --arg component "$component" 'map(select(. != $component))' <<<"$applied")"
+            write_state "$(jq -r '.requested // "custom"' "$state")" "$remaining" '[]' '[]' applied
+            ;;
             ;;
         *) usage ;;
     esac
