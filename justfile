@@ -84,7 +84,7 @@ _boot-config:
 
 # Run shellcheck on the scripts and hadolint on the Containerfile
 lint:
-    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
+    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
     shellcheck --shell=sh live/livesys-session-extra
     podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile live/Containerfile
 
@@ -112,6 +112,14 @@ bump-agentux:
     sed -i         -e "s/^ARG AGENTUX_CORE_VERSION=.*/ARG AGENTUX_CORE_VERSION=$core/"         -e "s/^ARG AGENTUX_DESKTOP_VERSION=.*/ARG AGENTUX_DESKTOP_VERSION=$desktop/"         -e "s/^ARG AGENTUX_PLASMA_SHA256=.*/ARG AGENTUX_PLASMA_SHA256=$sha/"         Containerfile
     echo "agentux-core $core, agentux-desktop $desktop (plasma sha256 $sha)"
     git diff --stat -- Containerfile
+
+# Tag a release of main's HEAD (e.g. just release 0.5.2) once main has published its image; release.yml then tests it and waits for approval
+release version:
+    scripts/release.sh {{ version }}
+
+# Approve the release run waiting in the `release` environment (promotes to :stable and publishes the ISOs)
+approve:
+    scripts/approve.sh
 
 # Run bootc-image-builder (rootful) on the local image
 _bib type config:
