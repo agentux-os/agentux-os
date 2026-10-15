@@ -322,6 +322,62 @@ else
     echo "::warning::$envgen not found; environment.d not resolved"
 fi
 
+# The welcome wizard's backend (agentux-desktop's /usr/libexec/agentux-setup)
+# and its catalog: the catalog parses, a dry run prints the commands the
+# wizard shows, the first-run marker decides whether it opens at login, the
+# user's Flathub remote can be added from the shipped repo file, and a real
+# install through the script (Flatseal, a small Flatpak; kubectl with mise)
+# works where the container allows it (those two only warn).
+welcome_wizard() {
+    echo "== welcome wizard (agentux-setup)"
+    local setup=/usr/libexec/agentux-setup catalog=/usr/share/agentux/setup/catalog.json out
+    assert "$setup executable" test -x "$setup"
+    assert "catalog $catalog parses, with items" jq -e '(.items | length) > 20 and (.categories | length) > 5' "$catalog"
+    assert "Flathub repo file" grep -qx 'Url=https://dl.flathub.org/repo/' /usr/share/agentux/setup/flathub.flatpakrepo
+    assert "login autostart runs agentux-setup autostart" \
+        grep -qx 'Exec=/usr/libexec/agentux-setup autostart' /etc/xdg/autostart/agentux-welcome.desktop
+    assert "app menu entry reopens the wizard" \
+        grep -qx 'Exec=agentux-cockpit --welcome' /usr/share/applications/agentux-welcome.desktop
+    out="$(as_user "$setup" install --dry-run vscode java@temurin-17 intellij-idea fedora-dev 2>&1 </dev/null)"
+    printf '%s\n' "$out" | sed 's/^/      /'
+    local line
+    for line in \
+        $'vscode\tflatpak install --user --noninteractive --or-update flathub com.visualstudio.code' \
+        $'vscode\tflatpak override --user --talk-name=org.freedesktop.Flatpak --filesystem=home com.visualstudio.code' \
+        $'java\tmise use --global java@temurin-17' \
+        $'intellij-idea\tagentux-setup jetbrains-toolbox' \
+        "fedora-dev"$'\t'"agentux-setup distrobox-create fedora-dev registry.fedoraproject.org/fedora-toolbox:$(sed -n 's/^VERSION_ID=//p' /etc/os-release | tr -d '"')"; do
+        assert "dry run: ${line//$'\t'/: }" grep -qxF "$line" <<<"$out"
+    done
+    assert "dry run refuses an unknown item" bash -c "! runuser -u '$user' -- '$setup' plan no-such-item 2>/dev/null"
+    # A regular user without the marker gets the wizard; after finish, not again.
+    check "$setup should-run"
+    check "$setup finish && ! $setup should-run && $setup reset && $setup should-run"
+    assert "distrobox installed (Distrobox items)" command -v distrobox
+    if command -v toolbox >/dev/null; then echo "ok    toolbox installed"; else echo "::warning::toolbox is not installed"; fi
+    if command -v firefox >/dev/null; then echo "      firefox: $(command -v firefox) (preinstalled)"; else echo "      firefox: not installed"; fi
+    echo "      system flatpak remotes:"
+    flatpak remotes --system --show-disabled --columns=name,options,url 2>&1 | sed 's/^/        /'
+
+    # The user's Flathub remote, as every Flatpak item adds it.
+    check "flatpak remote-add --user --if-not-exists flathub /usr/share/agentux/setup/flathub.flatpakrepo"
+    check "flatpak remotes --user --columns=name | grep -qx flathub"
+
+    # Real installs through the script, warnings only: network and the
+    # container (no user namespaces for bwrap, no D-Bus) may not allow them.
+    local item
+    for item in flatseal kubectl; do
+        if out="$(as_user timeout 900 "$setup" install "$item" 2>&1 </dev/null)"; then
+            echo "ok    agentux-setup install $item"
+        else
+            echo "::warning::agentux-setup install $item failed: $(tail -n 3 "$state/setup/logs/$item.log" 2>/dev/null | tr '\n' ' ')"
+        fi
+    done
+    as_user "$setup" status --scan </dev/null | jq -c '{flathub, items: (.items | map_values(.state)), installed}' | sed 's/^/      status: /' || true
+    as_user bash -lc 'kubectl version --client 2>/dev/null | head -n 1' </dev/null | sed 's/^/      /' || true
+}
+welcome_wizard
+
 # Antigravity's ACP server has a lower-priority unit of its own; it is
 # optional, so a failure or timeout here only warns.
 timed_run antigravity-acp agentux-antigravity-acp.service
