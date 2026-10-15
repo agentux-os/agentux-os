@@ -111,7 +111,8 @@ jobs:
           # quay.io's CDN drops blob downloads now and then: pull the base
           # with retries so the build starts from a local copy.
           sudo .github/scripts/pull.sh
-          sudo podman build --tag "$IMAGE" .
+          sudo podman build --build-arg AGENTUX_VERSION="$(date -u +%Y.%m.%d).${GITHUB_SHA::7}" \
+            --build-arg AGENTUX_COMMIT="$GITHUB_SHA" --tag "$IMAGE" .
 
       - name: Pull image
         if: steps.kvm.outputs.ok == 'true' && !startsWith(env.IMAGE, 'localhost/')

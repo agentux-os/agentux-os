@@ -163,6 +163,41 @@ assert "agentux icon in hicolor and pixmaps" \
     test -f /usr/share/icons/hicolor/scalable/apps/agentux.svg -a -f /usr/share/icons/hicolor/256x256/apps/agentux.png -a -f /usr/share/pixmaps/agentux.png
 assert "kcm-about-distrorc uses the AgentUX logo" \
     grep -qx 'LogoPath=/usr/share/icons/hicolor/256x256/apps/agentux.png' /etc/xdg/kcm-about-distrorc
+# The version people see is AgentUX's: the build's date, and IMAGE_VERSION
+# its date and commit (build.yml) or the date alone (a local build). Fedora's
+# release appears only as the base (ADR 0012).
+# shellcheck disable=SC2016
+assert "os-release VERSION is the build date, PRETTY_NAME AgentUX <VERSION>, no Fedora in either" \
+    bash -c '. /etc/os-release && [[ $VERSION =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}$ && $PRETTY_NAME == "AgentUX $VERSION" && $PRETTY_NAME$VERSION != *Fedora* ]] && echo "$PRETTY_NAME"'
+# shellcheck disable=SC2016
+assert "os-release IMAGE_VERSION=BUILD_ID=<VERSION>[.<commit>]" \
+    bash -c '. /etc/os-release && [[ $BUILD_ID == "$IMAGE_VERSION" ]] && { [[ $IMAGE_VERSION == "$VERSION" ]] || [[ $IMAGE_VERSION == "$VERSION".* && ${IMAGE_VERSION#"$VERSION".} =~ ^[0-9a-f]{7,}$ ]]; } && echo "$IMAGE_VERSION"'
+# shellcheck disable=SC2016
+assert "os-release HOME_URL is agentuxos.org" bash -c '. /etc/os-release && test "$HOME_URL" = https://agentuxos.org'
+# shellcheck disable=SC2016
+assert "/etc/system-release names AgentUX (bootupd's firmware boot entry)" \
+    bash -c '. /etc/os-release && test "$(cat /etc/system-release)" = "AgentUX release $VERSION" && cat /etc/system-release'
+# shellcheck disable=SC2016
+assert "agentux-version --json" \
+    bash -c 'agentux-version --json | jq -e --arg v "$(. /etc/os-release && echo "$IMAGE_VERSION")" ".name == \"AgentUX\" and .image_version == \$v and (.base | startswith(\"Fedora Linux \")) and (.summary | length > 0)" >/dev/null && agentux-version | head -n2 | tr "\n" " "'
+# shellcheck disable=SC2016
+assert "About page: the release line (about-release, two lines)" \
+    bash -c 'out="$(/usr/libexec/agentux/about-release)" && test "$(wc -l <<<"$out")" -ge 2 && test "$(head -n1 <<<"$out")" = Release: && sed -n 2p <<<"$out"'
+# shellcheck disable=SC2016
+assert "About page: the base line (about-base, two lines)" \
+    bash -c 'out="$(/usr/libexec/agentux/about-base)" && test "$(head -n1 <<<"$out")" = "Based on:" && sed -n 2p <<<"$out"'
+assert "kcm-about-distrorc runs both About scripts" \
+    grep -qx 'ExtraSoftwareData=/usr/libexec/agentux/about-release;/usr/libexec/agentux/about-base' /etc/xdg/kcm-about-distrorc
+assert "agentux-releases.timer enabled" test -L /etc/systemd/system/timers.target.wants/agentux-releases.timer
+# --refresh keeps only a valid release list, and keeps the old one otherwise.
+releases_dir="$(mktemp -d)"
+printf '{"schema": 1, "releases": [{"tag": "v0.0.1", "images": {"plasma": {"digest": "sha256:00"}}}]}\n' >"$releases_dir/good.json"
+echo 'not json' >"$releases_dir/bad.json"
+assert "agentux-version --refresh caches a valid list, ignores a broken one" \
+    bash -c "AGENTUX_RELEASES_URL=file://$releases_dir/good.json agentux-version --refresh >/dev/null \
+        && AGENTUX_RELEASES_URL=file://$releases_dir/bad.json agentux-version --refresh 2>/dev/null \
+        && jq -e '.releases[0].tag == \"v0.0.1\"' /var/cache/agentux/releases.json"
+rm -rf "$releases_dir" /var/cache/agentux/releases.json
 # plasma-setup's first-boot wizard loads its background from Fedora's Default
 # wallpaper package, which the Containerfile points at AgentUX's.
 for f in images/5120x2880.jxl images/1440x2960.jxl images_dark/5120x2880.jxl images_dark/1440x2960.jxl; do

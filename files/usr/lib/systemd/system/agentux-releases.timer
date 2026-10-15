@@ -1,0 +1,15 @@
+[Unit]
+Description=Fetch the list of AgentUX releases daily
+Documentation=https://github.com/agentux-os/agentux-os#version
+
+[Timer]
+# Shortly after boot (a new image may just have been booted) and then daily.
+# One anonymous HTTPS GET of a public file; `systemctl disable --now
+# agentux-releases.timer` turns it off (agentux-version then names releases
+# only for systems that follow a :v* tag).
+OnBootSec=2min
+OnUnitActiveSec=1d
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

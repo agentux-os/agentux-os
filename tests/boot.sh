@@ -228,6 +228,39 @@ check_os_release() {
     assert "hostnamectl reports AgentUX" bash -c "hostnamectl --json=short | jq -er '.OperatingSystemPrettyName | select(startswith(\"AgentUX \"))'"
     assert "kcm-about-distrorc points at the AgentUX logo" \
         grep -qx 'LogoPath=/usr/share/icons/hicolor/256x256/apps/agentux.png' /etc/xdg/kcm-about-distrorc
+    check_version
+}
+
+# What people see as the version is AgentUX's (ADR 0012): the build's date in
+# os-release, the boot menu and hostnamectl; the release and channel from the
+# booted image (agentux-version, KDE's About page); Fedora only as the base.
+# The inner bash expands the variables.
+# shellcheck disable=SC2016
+check_version() {
+    echo "== version"
+    local f=/etc/os-release
+    assert "PRETTY_NAME is AgentUX <build date>, without Fedora" \
+        bash -c ". $f && [[ \$VERSION =~ ^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}\$ && \$PRETTY_NAME == \"AgentUX \$VERSION\" && \$PRETTY_NAME != *Fedora* ]] && echo \"\$PRETTY_NAME\""
+    assert "IMAGE_VERSION is <build date>[.<commit>]" \
+        bash -c ". $f && [[ \$IMAGE_VERSION == \"\$VERSION\"* ]] && echo \"\$IMAGE_VERSION\""
+    assert "/etc/system-release is AgentUX's" \
+        bash -c ". $f && test \"\$(cat /etc/system-release)\" = \"AgentUX release \$VERSION\" && cat /etc/system-release"
+    # The boot menu's entries are the ostree deployments' BLS titles, which
+    # ostree takes from PRETTY_NAME.
+    assert "boot menu entries are titled AgentUX, without Fedora" \
+        bash -c "titles=\"\$(sudo sh -c 'cat /boot/loader/entries/*.conf' | sed -n 's/^title //p')\" && [[ -n \$titles && \$titles == AgentUX* && \$titles != *Fedora* ]] && echo \"\$titles\" | tr '\n' ';'"
+    local booted
+    booted="$(sudo bootc status --format=json 2>/dev/null | jq -r '.status.booted.image.image.image // empty')"
+    assert "agentux-version (as a user, through rpm-ostree) names the booted image $booted" \
+        bash -c "agentux-version --json | jq -e --arg b '$booted' '.image == \$b and (.digest | startswith(\"sha256:\")) and (.channel | length > 0)' >/dev/null && agentux-version | sed -n 2p"
+    assert "agentux-version (as root, through bootc) names the booted image" \
+        bash -c "sudo agentux-version --json | jq -e --arg b '$booted' '.image == \$b' >/dev/null"
+    agentux-version 2>&1 | indent
+    assert "About page: Release line" \
+        bash -c 'out="$(/usr/libexec/agentux/about-release)" && test "$(head -n1 <<<"$out")" = Release: && sed -n 2p <<<"$out"'
+    assert "About page: Based on Fedora" \
+        bash -c 'out="$(/usr/libexec/agentux/about-base)" && test "$(head -n1 <<<"$out")" = "Based on:" && sed -n 2p <<<"$out" | grep "^Fedora Linux"'
+    assert "agentux-releases.timer enabled" systemctl is-enabled agentux-releases.timer
 }
 
 check_system() {

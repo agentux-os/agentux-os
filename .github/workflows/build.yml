@@ -61,9 +61,16 @@ jobs:
       - name: Pull the base image
         run: .github/scripts/pull.sh
 
+      # The image's own version (os-release IMAGE_VERSION, the
+      # org.opencontainers.image.version label): the build's date and commit,
+      # e.g. 2026.10.15.063578e. A release promotes this image unchanged, so
+      # the release name is not in it (ADR 0012, agentux-version).
       - name: Build
         run: |
-          podman build --build-arg VARIANT=${{ matrix.variant }} --tag agentux:ci .
+          podman build --build-arg VARIANT=${{ matrix.variant }} \
+            --build-arg AGENTUX_VERSION="$(date -u +%Y.%m.%d).${GITHUB_SHA::7}" \
+            --build-arg AGENTUX_COMMIT="$GITHUB_SHA" \
+            --tag agentux:ci .
           test "$(podman image inspect --format '{{.Architecture}}' agentux:ci)" = "${{ matrix.arch }}"
 
       - name: Push
@@ -336,7 +343,11 @@ jobs:
         run: .github/scripts/pull.sh
 
       - name: Build
-        run: podman build --build-arg VARIANT=${{ matrix.variant }} --tag agentux:ci .
+        run: |
+          podman build --build-arg VARIANT=${{ matrix.variant }} \
+            --build-arg AGENTUX_VERSION="$(date -u +%Y.%m.%d).${GITHUB_SHA::7}" \
+            --build-arg AGENTUX_COMMIT="$GITHUB_SHA" \
+            --tag agentux:ci .
 
       - name: First login and tool checks
         env:
@@ -362,8 +373,16 @@ jobs:
 
       - name: shellcheck
         run: |
-          shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
+          shellcheck files/usr/bin/agentux-version files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
           shellcheck --shell=sh live/livesys-session-extra
 
       - name: hadolint
         run: docker run --rm -v "$PWD:/src:ro" -w /src hadolint/hadolint:v2.15.1 hadolint Containerfile live/Containerfile
+
+      # The list a release publishes (publish-iso.sh), built here from the
+      # registry's current v* tags, so a broken script shows up before a
+      # release needs it.
+      - name: releases.json
+        run: |
+          .github/scripts/releases-json.sh "$RUNNER_TEMP/releases.json"
+          jq . "$RUNNER_TEMP/releases.json"

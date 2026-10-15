@@ -24,6 +24,7 @@
 #   iso/<tag>/<prefix>-<tag>-<arch>.iso   every release, kept
 #   iso/nightly/<prefix>-<arch>.iso       the newest weekly or dispatched build
 #   latest.json                           the newest release, for the website
+#   releases.json                         every release's image digests, for agentux-version
 # each ISO with .iso.sha256 (naming the file next to it, so `sha256sum
 # --check` works on either copy) and .iso.sha256.sigstore.json (a cosign
 # bundle, signed with the AgentUX key that also signs the images). Every
@@ -284,6 +285,18 @@ s3 cp latest.json "s3://$bucket/latest.json" --content-type application/json --c
 s3 cp latest.json.sigstore.json "s3://$bucket/latest.json.sigstore.json" \
     --content-type application/json --cache-control "$short"
 echo "- [\`latest.json\`]($base/latest.json) now names $tag" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+# ---- releases.json ---------------------------------------------------------------
+
+# Every release's image digests, so installed systems can name the release
+# they run (agentux-version; ADR 0012). Rebuilt from the registry's v* tags,
+# which the release job has just moved for this one.
+OWNER=${OWNER:-agentux-os} "$here/releases-json.sh" releases.json
+sign releases.json
+s3 cp releases.json "s3://$bucket/releases.json" --content-type application/json --cache-control "$short"
+s3 cp releases.json.sigstore.json "s3://$bucket/releases.json.sigstore.json" \
+    --content-type application/json --cache-control "$short"
+echo "- [\`releases.json\`]($base/releases.json): $(jq -r '[.releases[].tag] | join(", ")' releases.json)" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 # Again, so / lists latest.json from the first release on.
 "$here/download-index.sh"
