@@ -174,12 +174,17 @@ grep -q 'agentux-live-install.desktop' "$layout"
 
 # ---- installer -------------------------------------------------------------
 
-# Anaconda's product name comes from /etc/system-release ("AgentUX 44" in
-# its title bar instead of Fedora's); a link to fedora-release otherwise.
-fedora="$(sed -n 's/^VERSION_ID=//p' /usr/share/agentux/os-release.base | tr -d '"')"
-test -n "$fedora"
+# liveinst takes Anaconda's product name and version from /etc/system-release
+# ("<name> release <version>"). The image has AgentUX's there since ADR 0012
+# ("AgentUX release <build date>"); this names the variant and keeps
+# AgentUX's version, never Fedora's 44 (an image from before that has
+# Fedora's link here and a VERSION of "<date> (Fedora Linux 44 base)", whose
+# first word is still the date).
+version="$(sed -n 's/^VERSION=//p' /usr/lib/os-release | tr -d '"' | cut -d' ' -f1)"
+test -n "$version"
 rm -f /etc/system-release
-echo "$title release $fedora" >/etc/system-release
+echo "$title release $version" >/etc/system-release
+grep -vq ' 44$' /etc/system-release
 
 # The web installer's look: anaconda-webui runs in Cockpit and takes its logo
 # and brand colours from Cockpit's branding (Fedora's blue title bar and

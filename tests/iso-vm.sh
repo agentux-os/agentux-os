@@ -9,7 +9,13 @@
 # 1. Read the ISO's own boot entry (EFI/BOOT/grub.cfg: kernel, initrd and
 #    command line) and its kickstart (the inst.ks= file: the interactive
 #    mode line, bootc-image-builder's `ostreecontainer` from the image
-#    embedded in the ISO, and its %post `bootc switch` to the channel).
+#    embedded in the ISO, and its %post `bootc switch` to the channel), and
+#    the AgentUX branding installer/brand-iso.sh added: the volume label,
+#    the boot menu's names and Anaconda's images/product.img.
+#    Then boot the ISO as a person would (firmware, its GRUB, the default
+#    entry) and screendump the boot menu and the graphical installer
+#    (look/*.png); tests/installer-look.py fails the test if Anaconda wears
+#    Fedora's colours instead of AgentUX's.
 # 2. Make that kickstart unattended: drop the UI mode, add the answers the
 #    installer's UI would get (language, time zone, the whole disk), a test
 #    user with a throwaway SSH key and password, sshd enabled, and poweroff
@@ -24,9 +30,10 @@
 #    failed units, the display manager runs.
 #
 # Logs and summary.md go to DIR. Needs qemu-system-x86_64 (or -aarch64) with
-# KVM, UEFI firmware, qemu-img, xorriso, ssh and python3. ISO_TEST_MEMORY
-# (MiB, 8192), ISO_TEST_CPUS (4) and ISO_TEST_INSTALL_TIMEOUT (seconds, 3600)
-# tune the install.
+# KVM, UEFI firmware, qemu-img, xorriso, cpio, ssh and python3.
+# ISO_TEST_MEMORY (MiB, 8192), ISO_TEST_CPUS (4) and ISO_TEST_INSTALL_TIMEOUT
+# (seconds, 3600) tune the install; ISO_TEST_LOOK_TIMEOUT (seconds, 420) is
+# how long to wait for the graphical installer.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -40,12 +47,12 @@ machine="$(uname -m)"
 if [[ "$machine" = aarch64 ]]; then
     firmware=(/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd
               /usr/share/edk2/aarch64/QEMU_EFI-pflash.raw:/usr/share/edk2/aarch64/vars-template-pflash.raw)
-    qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host serial=ttyAMA0
+    qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host serial=ttyAMA0 display=virtio-gpu-pci
 else
     firmware=(/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd
               /usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd
               /usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd)
-    qemu=qemu-system-x86_64 vm_machine=q35,accel=kvm serial=ttyS0
+    qemu=qemu-system-x86_64 vm_machine=q35,accel=kvm serial=ttyS0 display=virtio-vga
 fi
 code="" vars=""
 for pair in "${firmware[@]}"; do
@@ -121,6 +128,102 @@ else
     summary "Kickstart switches to \`$track\`" FAIL
     exit 1
 fi
+
+# The AgentUX branding installer/brand-iso.sh put on the ISO: its label, the
+# boot menu's names, and Anaconda's product image.
+label="$(xorriso -indev "$iso" -pvd_info 2>/dev/null | sed -n 's/^Volume Id *: *//p' | head -n1)"
+titles="$(grep -E '^[[:space:]]*(menuentry|submenu)' "$inst/grub.cfg" | sed -E "s/^[[:space:]]*(menuentry|submenu) '([^']*)'.*/\2/" | paste -sd ';')"
+echo "volume label: $label; boot menu: $titles"
+if [[ $label == AgentUX-* && $titles == *AgentUX* && $titles != *Fedora* && ! $titles =~ AgentUX\ [0-9]+ ]]; then
+    summary "ISO label and boot menu name AgentUX" "ok: \`$label\`; ${titles//;/, }"
+else
+    echo "::error::the ISO's label ($label) or boot menu ($titles) is not AgentUX's"
+    summary "ISO label and boot menu name AgentUX" "FAIL: \`$label\`; $titles"
+    exit 1
+fi
+mkdir -p "$inst/product"
+if extract /images/product.img "$inst/product.img" \
+    && (cd "$inst/product" && zcat ../product.img | cpio --quiet -id) \
+    && grep -qx 'Product=AgentUX' "$inst/product/.buildstamp" \
+    && grep -q 'agentux' "$inst/product/usr/share/anaconda/pixmaps/fedora.css" \
+    && [[ -s "$inst/product/usr/share/anaconda/pixmaps/sidebar-logo.png" ]]; then
+    summary "Anaconda product image (AgentUX name, stylesheet, art)" "ok: $(sed -n 's/^Version=//p' "$inst/product/.buildstamp")"
+    cp "$inst/product/.buildstamp" "$inst/buildstamp.txt"
+else
+    echo "::error::the ISO has no AgentUX images/product.img"
+    summary "Anaconda product image (AgentUX name, stylesheet, art)" FAIL
+    exit 1
+fi
+rm -rf "$inst/product" "$inst/product.img"
+
+# ---- 1b. what the installer looks like -------------------------------------------
+
+# The ISO booted the way a person boots it (firmware, the ISO's own GRUB,
+# its default entry, the graphical installer), with screendumps of the
+# menu and of Anaconda once it is drawn; tests/installer-look.py tells
+# AgentUX's colours from Fedora's. Nothing is installed: the ISO's own
+# kickstart waits for the person at the first screen.
+look="$dir/look"
+rm -rf "$look"
+mkdir -p "$look"
+cp "$vars" "$look/OVMF_VARS.fd"
+"$qemu" \
+    -name agentux-iso-look \
+    -machine "$vm_machine" -cpu host \
+    -smp "${ISO_TEST_CPUS:-4}" -m "${ISO_TEST_MEMORY:-8192}" \
+    -drive if=pflash,format=raw,readonly=on,file="$code" \
+    -drive if=pflash,format=raw,file="$look/OVMF_VARS.fd" \
+    -device virtio-scsi-pci,id=scsi \
+    -drive "file=$iso,media=cdrom,if=none,id=cd,readonly=on" -device scsi-cd,drive=cd,bus=scsi.0,bootindex=0 \
+    -nic user,model=virtio-net-pci \
+    -device virtio-rng-pci \
+    -device "$display" -display none \
+    -serial file:"$look/serial.log" \
+    -qmp unix:"$look/qmp.sock",server=on,wait=off \
+    -pidfile "$look/qemu.pid" -daemonize
+qmp() { python3 "$here/qga.py" qmp "$look/qmp.sock" "$1" >/dev/null 2>&1; }
+shot() { qmp "{\"execute\": \"screendump\", \"arguments\": {\"filename\": \"$1\", \"format\": \"$2\"}}"; }
+sleep 15
+shot "$look/01-boot-menu.png" png || true
+# The default entry now, rather than after GRUB's 60 s.
+qmp '{"execute": "send-key", "arguments": {"keys": [{"type": "qcode", "data": "ret"}]}}' || true
+look_rc=2 start=$SECONDS
+while (( SECONDS - start < ${ISO_TEST_LOOK_TIMEOUT:-420} )); do
+    sleep 20
+    shot "$look/frame.ppm" ppm || continue
+    set +e
+    python3 "$here/installer-look.py" "$look/frame.ppm" >"$look/look.txt"
+    look_rc=$?
+    set -e
+    if (( look_rc != 2 )); then
+        # Up: give GTK a moment to finish drawing, then judge that frame.
+        sleep 20
+        shot "$look/frame.ppm" ppm || true
+        set +e
+        python3 "$here/installer-look.py" "$look/frame.ppm" >"$look/look.txt"
+        look_rc=$?
+        set -e
+        break
+    fi
+done
+shot "$look/02-installer.png" png || true
+cat "$look/look.txt" 2>/dev/null || true
+qmp '{"execute": "quit"}' || true
+sleep 2
+if [[ -e "$look/qemu.pid" ]]; then kill "$(cat "$look/qemu.pid")" 2>/dev/null || true; fi
+rm -f "$look/OVMF_VARS.fd" "$look/qemu.pid" "$look/qmp.sock" "$look/frame.ppm"
+case "$look_rc" in
+    0) summary "Installer shows AgentUX's look (look/02-installer.png)" "ok: $(head -n1 "$look/look.txt")" ;;
+    1)
+        echo "::error::the installer does not show AgentUX's branding; see look/02-installer.png"
+        summary "Installer shows AgentUX's look (look/02-installer.png)" "FAIL: $(tail -n1 "$look/look.txt")"
+        exit 1
+        ;;
+    *)
+        echo "::warning::the graphical installer did not appear within ${ISO_TEST_LOOK_TIMEOUT:-420}s; see look/02-installer.png"
+        summary "Installer shows AgentUX's look (look/02-installer.png)" "warn: no installer on screen after ${ISO_TEST_LOOK_TIMEOUT:-420}s"
+        ;;
+esac
 
 # ---- 2. an unattended kickstart --------------------------------------------------
 

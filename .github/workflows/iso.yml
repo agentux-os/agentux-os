@@ -42,7 +42,10 @@ on:
       - .github/scripts/pull.sh
       - .github/scripts/channel.sh
       - disk_config/iso.toml
+      - installer/**
       - tests/iso-vm.sh
+      - tests/installer-look.py
+      - tests/qga.py
       - tests/boot-vm.sh
       - tests/boot.sh
 
@@ -155,6 +158,22 @@ jobs:
             --chown "$(id -u):$(id -g)" \
             "$TRACK_IMAGE"
 
+      # bootc-image-builder's installer environment is Fedora's: its Anaconda
+      # shows Fedora's logo and colours and its menu "Install AgentUX 44".
+      # installer/brand-iso.sh adds Anaconda's product image with AgentUX's
+      # look and name, and renames the volume and the boot menu entries; the
+      # payload and the kickstart are untouched (ADR 0012).
+      - name: Brand the ISO
+        if: steps.arch.outputs.ok == 'true'
+        run: |
+          # The images are not needed anymore; the rewritten ISO needs room.
+          sudo podman rmi --all --force >/dev/null || true
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xorriso mtools cpio isomd5sum
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then label=$GITHUB_REF_NAME; else label=nightly; fi
+          installer/brand-iso.sh output/bootiso/install.iso output/bootiso/agentux.iso "$label"
+          mv output/bootiso/agentux.iso output/bootiso/install.iso
+
       - name: Name and checksum the ISO
         if: steps.arch.outputs.ok == 'true'
         id: iso
@@ -213,7 +232,7 @@ jobs:
         if: steps.kvm.outputs.ok == 'true'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils ovmf xorriso
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils ovmf xorriso cpio
           # Room for the VM's disk; the images are not needed anymore.
           sudo podman rmi --all --force >/dev/null || true
           sudo rm -rf output
@@ -240,6 +259,10 @@ jobs:
             iso-test/install/*.log
             iso-test/install/*.cfg
             iso-test/install/iso*.ks
+            iso-test/install/buildstamp.txt
+            iso-test/look/*.png
+            iso-test/look/*.txt
+            iso-test/look/*.log
             iso-test/boot/*.png
             iso-test/boot/*.log
             iso-test/boot/*.txt
