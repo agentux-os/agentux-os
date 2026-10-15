@@ -1,0 +1,78 @@
+/* Anaconda GTK style overrides for AgentUX.
+ *
+ * The installer ISO's Anaconda is Fedora's, and Fedora's profile points its
+ * custom stylesheet at /usr/share/anaconda/pixmaps/fedora.css (from
+ * fedora-logos). The ISO's images/product.img (installer/brand-iso.sh)
+ * replaces this file and the pixmaps next to it with AgentUX's, so whichever
+ * Fedora profile Anaconda picks draws the AgentUX sidebar and title bar:
+ * Ink backgrounds, the Lime mark, Mist text (agentux brand/README.md).
+ * The pixmaps come from installer/build.py. */
+
+@define-color agentux_ink #0b0d10;
+@define-color agentux_lime #c6f36b;
+@define-color agentux_mist #e7eaef;
+
+/* The sidebar consists of three parts: a background, a logo, and a product
+ * logo, rendered in that order. */
+.logo-sidebar {
+    background-image: url('/usr/share/anaconda/pixmaps/sidebar-bg.png');
+    background-color: @agentux_ink;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+
+.logo {
+    background-image: url('/usr/share/anaconda/pixmaps/sidebar-logo.png');
+    background-position: 50% 20px;
+    background-repeat: no-repeat;
+    background-color: transparent;
+}
+
+.product-logo {
+    background-image: none;
+    background-color: transparent;
+}
+
+/* The title bar of every screen. */
+AnacondaSpokeWindow #nav-box {
+    background-color: @agentux_ink;
+    background-image: url('/usr/share/anaconda/pixmaps/topbar-bg.png');
+    background-repeat: repeat;
+    color: @agentux_mist;
+}
+
+/* Selections and the main button in Moss, the accent on light backgrounds
+ * (Lime is unreadable on Anaconda's light pages), instead of Adwaita's blue,
+ * as the live installer does. */
+@define-color agentux_moss #4f7d0b;
+@define-color agentux_moss_dark #3b5e08;
+
+treeview.view:selected,
+treeview.view:selected:focus,
+list row:selected,
+row:selected {
+    background-color: @agentux_moss;
+    color: white;
+}
+
+button.suggested-action {
+    background-image: none;
+    background-color: @agentux_moss;
+    border-color: @agentux_moss_dark;
+    color: white;
+    text-shadow: none;
+}
+
+button.suggested-action:hover {
+    background-color: #5c8f10;
+}
+
+button.suggested-action:active,
+button.suggested-action:checked {
+    background-color: @agentux_moss_dark;
+}
+
+entry:focus {
+    border-color: @agentux_moss;
+    box-shadow: inset 0 0 0 1px @agentux_moss;
+}
