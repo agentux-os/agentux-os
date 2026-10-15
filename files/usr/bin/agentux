@@ -1,0 +1,105 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+catalog="${AGENTUX_PROFILE_CATALOG:-/usr/share/agentux/profiles/catalog.json}"
+state="${AGENTUX_PROFILE_STATE:-/var/lib/agentux/profile.json}"
+
+die() { echo "agentux: $*" >&2; exit 2; }
+need_jq() { command -v jq >/dev/null 2>&1 || die "jq is required"; }
+usage() {
+    cat >&2 <<'EOF'
+usage: agentux profile {show|plan|apply} PROFILE [--components a,b,...]
+       agentux profile seed PROFILE
+       agentux profile apply-intent
+       agentux profile remove COMPONENT
+EOF
+    exit 2
+}
+
+profile_cmd() {
+    need_jq
+    [[ -r "$catalog" ]] || die "profile catalog not found: $catalog"
+    jq -e '.catalogVersion and (.profiles | type == "object") and (.components | type == "object")' \
+        "$catalog" >/dev/null || die "invalid profile catalog: $catalog"
+    local action="${1:-}" value="${2:-}" components_arg=""
+    [[ -n "$action" ]] || usage
+    if [[ "$action" != show && "$action" != apply-intent && -z "$value" ]]; then
+        usage
+    fi
+    if [[ "${3:-}" == --components && -n "${4:-}" ]]; then
+        components_arg="$4"
+    elif [[ -n "${3:-}" ]]; then
+        usage
+    fi
+
+    case "$action" in
+        show)
+            if [[ -r "$state" ]]; then
+                jq -c . "$state"
+            else
+                jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
+                    '{catalogVersion:$version,requested:null,applied:[],pending:[],failed:[]}'
+            fi
+            ;;
+        plan|apply)
+            jq -e --arg profile "$value" '.profiles[$profile]' "$catalog" >/dev/null \
+                || die "unknown profile: $value"
+            local components
+            if [[ "$value" == custom ]]; then
+                [[ -n "$components_arg" ]] || die "custom profile requires --components"
+                components="$(tr ',' '\n' <<<"$components_arg" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
+                while IFS= read -r component; do
+                    jq -e --arg component "$component" '.components[$component]' "$catalog" >/dev/null \
+                        || die "unknown component: $component"
+                done < <(jq -r '.[]' <<<"$components")
+            else
+                [[ -z "$components_arg" ]] || die "--components is only valid for custom"
+                components="$(jq -c --arg profile "$value" \
+                    '.profiles[$profile].components | unique' "$catalog")"
+            fi
+            if [[ "$action" == apply && "$(jq -r 'index("command-server") // empty' <<<"$components")" != "" ]]; then
+                [[ -x /usr/libexec/agentux/profile-command ]] \
+                    || die "Command profile support is unavailable"
+                /usr/libexec/agentux/profile-command
+            fi
+            jq -cn --arg profile "$value" --argjson components "$components" \
+                '{profile:$profile,components:$components}'
+            if [[ "$action" == apply ]]; then
+                mkdir -p "$(dirname "$state")"
+                local tmp
+                tmp="$(mktemp "${state}.XXXXXX")"
+                jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
+                    --arg profile "$value" --argjson applied "$components" \
+                    '{catalogVersion:$version,requested:$profile,applied:$applied,pending:[],failed:[]}' \
+                    >"$tmp"
+                mv -f "$tmp" "$state"
+            fi
+            ;;
+        seed)
+            jq -e --arg profile "$value" '.profiles[$profile]' "$catalog" >/dev/null \
+                || die "unknown profile: $value"
+            mkdir -p "$(dirname "$state")"
+            local intent="$(dirname "$state")/profile-intent.json" tmp
+            tmp="$(mktemp "${intent}.XXXXXX")"
+            jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
+                --arg profile "$value" \
+                '{catalogVersion:$version,profile:$profile}' >"$tmp"
+            mv -f "$tmp" "$intent"
+            ;;
+        apply-intent)
+            local intent="$(dirname "$state")/profile-intent.json" profile
+            [[ -r "$intent" ]] || exit 0
+            profile="$(jq -er '.profile' "$intent")" || die "invalid profile intent: $intent"
+            profile_cmd apply "$profile" >/dev/null
+            rm -f "$intent"
+            ;;
+        remove)
+            die "removing capabilities is not implemented yet; use profile apply"
+            ;;
+        *) usage ;;
+    esac
+}
+
+[[ "${1:-}" == profile ]] || usage
+shift
+profile_cmd "$@"
