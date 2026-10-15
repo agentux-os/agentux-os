@@ -7,7 +7,8 @@
 #
 #   - a live boot: dracut's dmsquash-live in the initramfs, GRUB entries in
 #     /usr/lib/bootc-image-builder/iso.yaml and the EFI binaries Titanoboa
-#     copies onto the ISO;
+#     copies onto the ISO; on x86_64 GRUB's BIOS modules, which
+#     live/bios-iso.sh adds to the ISO (Titanoboa's is UEFI only);
 #   - livesys-scripts: a passwordless `liveuser` logged in automatically
 #     into Plasma (or AgentUX Hyprland), with Fedora's live tweaks;
 #   - no ~1 GB of downloads into RAM at login: the agent CLIs' first-login
@@ -50,11 +51,20 @@ arch="$(uname -m)"
 # scriptlets write there.
 mkdir -p "$(realpath /root)"
 
+# x86_64 also boots BIOS: live.yml takes GRUB's i386-pc modules and an El
+# Torito core image (grub2-mkimage) from this image for live/bios-iso.sh.
 case "$arch" in
-    x86_64) efi_pkgs=(grub2-efi-x64-cdboot) fallback=fbx64.efi grub=grubx64.efi ;;
+    x86_64) efi_pkgs=(grub2-efi-x64-cdboot grub2-pc-modules /usr/bin/grub2-mkimage) fallback=fbx64.efi grub=grubx64.efi ;;
     aarch64) efi_pkgs=(grub2-efi-aa64-modules) fallback=fbaa64.efi grub=grubaa64.efi ;;
     *) echo "unsupported architecture $arch" >&2; exit 1 ;;
 esac
+
+# What an install on a BIOS machine needs from the image itself (bootupd
+# installs GRUB for BIOS from the deployment): GRUB's pc platform and
+# bootupd's BIOS component. Logged for the build, checked by the BIOS install
+# in live.yml's test.
+rpm -q bootupd grub2-pc grub2-pc-modules grub2-tools || true
+ls /usr/lib/bootupd/updates/ || true
 
 # anaconda-live is the installer for live media (liveinst); livesys-scripts
 # sets up the live user and autologin at boot; dracut-live has the initramfs
@@ -84,6 +94,11 @@ grep -q 'dmsquash-live-root' /tmp/initramfs.txt
 grep -q 'usr/share/plymouth/themes/agentux/agentux.script$' /tmp/initramfs.txt
 rm /tmp/initramfs.txt
 chmod 0644 "$img"
+
+if [[ $arch == x86_64 ]]; then
+    test -f /usr/lib/grub/i386-pc/boot_hybrid.img
+    command -v grub2-mkimage
+fi
 
 # Titanoboa copies /boot/efi/EFI onto the ISO's EFI partition. Fedora keeps
 # shim and GRUB under /usr/lib/efi; the fallback loader is replaced with

@@ -15,7 +15,8 @@
 #    Then boot the ISO as a person would (firmware, its GRUB, the default
 #    entry) and screendump the boot menu and the graphical installer
 #    (look/*.png); tests/installer-look.py fails the test if Anaconda wears
-#    Fedora's colours instead of AgentUX's.
+#    Fedora's colours instead of AgentUX's. On x86_64, the same boot with
+#    BIOS (SeaBIOS, no OVMF) must reach the installer too (look-bios/*.png).
 # 2. Make that kickstart unattended: drop the UI mode, add the answers the
 #    installer's UI would get (language, time zone, the whole disk), a test
 #    user with a throwaway SSH key and password, sshd enabled, and poweroff
@@ -163,60 +164,76 @@ rm -rf "$inst/product" "$inst/product.img"
 # menu and of Anaconda once it is drawn; tests/installer-look.py tells
 # AgentUX's colours from Fedora's. Nothing is installed: the ISO's own
 # kickstart waits for the person at the first screen.
-look="$dir/look"
-rm -rf "$look"
-mkdir -p "$look"
-cp "$vars" "$look/OVMF_VARS.fd"
-"$qemu" \
-    -name agentux-iso-look \
-    -machine "$vm_machine" -cpu host \
-    -smp "${ISO_TEST_CPUS:-4}" -m "${ISO_TEST_MEMORY:-8192}" \
-    -drive if=pflash,format=raw,readonly=on,file="$code" \
-    -drive if=pflash,format=raw,file="$look/OVMF_VARS.fd" \
-    -device virtio-scsi-pci,id=scsi \
-    -drive "file=$iso,media=cdrom,if=none,id=cd,readonly=on" -device scsi-cd,drive=cd,bus=scsi.0,bootindex=0 \
-    -nic user,model=virtio-net-pci \
-    -device virtio-rng-pci \
-    -device "$display" -display none \
-    -serial file:"$look/serial.log" \
-    -qmp unix:"$look/qmp.sock",server=on,wait=off \
-    -pidfile "$look/qemu.pid" -daemonize
-qmp() { python3 "$here/qga.py" qmp "$look/qmp.sock" "$1" >/dev/null 2>&1; }
-shot() { qmp "{\"execute\": \"screendump\", \"arguments\": {\"filename\": \"$1\", \"format\": \"$2\"}}"; }
-sleep 15
-shot "$look/01-boot-menu.png" png || true
-# The default entry now, rather than after GRUB's 60 s.
-qmp '{"execute": "send-key", "arguments": {"keys": [{"type": "qcode", "data": "ret"}]}}' || true
-look_rc=2 start=$SECONDS
-while (( SECONDS - start < ${ISO_TEST_LOOK_TIMEOUT:-420} )); do
-    sleep 20
-    shot "$look/frame.ppm" ppm || continue
-    set +e
-    python3 "$here/installer-look.py" "$look/frame.ppm" >"$look/look.txt"
-    look_rc=$?
-    set -e
-    if (( look_rc != 2 )); then
-        # Up: give GTK a moment to finish drawing, then judge that frame.
+#
+# look_boot DIR uefi|bios: one such boot, into DIR (01-boot-menu.png,
+# 02-installer.png, look.txt, serial.log); sets look_rc as
+# installer-look.py exits (0 AgentUX's look, 1 Fedora's, 2 no installer).
+# bios boots with QEMU's default firmware, SeaBIOS, which starts the ISO's
+# El Torito BIOS image (GRUB i386-pc), as VirtualBox and other VMs do by
+# default.
+look_boot() {
+    local look="$1" fw_args=()
+    rm -rf "$look"
+    mkdir -p "$look"
+    if [[ $2 == uefi ]]; then
+        cp "$vars" "$look/OVMF_VARS.fd"
+        fw_args=(-drive if=pflash,format=raw,readonly=on,file="$code"
+                 -drive if=pflash,format=raw,file="$look/OVMF_VARS.fd")
+    fi
+    "$qemu" \
+        -name agentux-iso-look \
+        -machine "$vm_machine" -cpu host \
+        -smp "${ISO_TEST_CPUS:-4}" -m "${ISO_TEST_MEMORY:-8192}" \
+        "${fw_args[@]}" \
+        -device virtio-scsi-pci,id=scsi \
+        -drive "file=$iso,media=cdrom,if=none,id=cd,readonly=on" -device scsi-cd,drive=cd,bus=scsi.0,bootindex=0 \
+        -nic user,model=virtio-net-pci \
+        -device virtio-rng-pci \
+        -device "$display" -display none \
+        -serial file:"$look/serial.log" \
+        -qmp unix:"$look/qmp.sock",server=on,wait=off \
+        -pidfile "$look/qemu.pid" -daemonize
+    qmp() { python3 "$here/qga.py" qmp "$look/qmp.sock" "$1" >/dev/null 2>&1; }
+    shot() { qmp "{\"execute\": \"screendump\", \"arguments\": {\"filename\": \"$1\", \"format\": \"$2\"}}"; }
+    sleep 15
+    shot "$look/01-boot-menu.png" png || true
+    # The default entry now, rather than after GRUB's 60 s.
+    qmp '{"execute": "send-key", "arguments": {"keys": [{"type": "qcode", "data": "ret"}]}}' || true
+    look_rc=2
+    local start=$SECONDS
+    while (( SECONDS - start < ${ISO_TEST_LOOK_TIMEOUT:-420} )); do
         sleep 20
-        shot "$look/frame.ppm" ppm || true
+        shot "$look/frame.ppm" ppm || continue
         set +e
         python3 "$here/installer-look.py" "$look/frame.ppm" >"$look/look.txt"
         look_rc=$?
         set -e
-        break
-    fi
-done
-shot "$look/02-installer.png" png || true
-cat "$look/look.txt" 2>/dev/null || true
-qmp '{"execute": "quit"}' || true
-sleep 2
-if [[ -e "$look/qemu.pid" ]]; then kill "$(cat "$look/qemu.pid")" 2>/dev/null || true; fi
-rm -f "$look/OVMF_VARS.fd" "$look/qemu.pid" "$look/qmp.sock" "$look/frame.ppm"
+        if (( look_rc != 2 )); then
+            # Up: give GTK a moment to finish drawing, then judge that frame.
+            sleep 20
+            shot "$look/frame.ppm" ppm || true
+            set +e
+            python3 "$here/installer-look.py" "$look/frame.ppm" >"$look/look.txt"
+            look_rc=$?
+            set -e
+            break
+        fi
+    done
+    shot "$look/02-installer.png" png || true
+    cat "$look/look.txt" 2>/dev/null || true
+    qmp '{"execute": "quit"}' || true
+    sleep 2
+    if [[ -e "$look/qemu.pid" ]]; then kill "$(cat "$look/qemu.pid")" 2>/dev/null || true; fi
+    rm -f "$look/OVMF_VARS.fd" "$look/qemu.pid" "$look/qmp.sock" "$look/frame.ppm"
+}
+
+look_boot "$dir/look" uefi
+uefi_look_rc=$look_rc
 case "$look_rc" in
-    0) summary "Installer shows AgentUX's look (look/02-installer.png)" "ok: $(head -n1 "$look/look.txt")" ;;
+    0) summary "Installer shows AgentUX's look (look/02-installer.png)" "ok: $(head -n1 "$dir/look/look.txt")" ;;
     1)
         echo "::error::the installer does not show AgentUX's branding; see look/02-installer.png"
-        summary "Installer shows AgentUX's look (look/02-installer.png)" "FAIL: $(tail -n1 "$look/look.txt")"
+        summary "Installer shows AgentUX's look (look/02-installer.png)" "FAIL: $(tail -n1 "$dir/look/look.txt")"
         exit 1
         ;;
     *)
@@ -224,6 +241,44 @@ case "$look_rc" in
         summary "Installer shows AgentUX's look (look/02-installer.png)" "warn: no installer on screen after ${ISO_TEST_LOOK_TIMEOUT:-420}s"
         ;;
 esac
+
+# ---- 1c. the same on a BIOS machine (x86_64) -------------------------------------
+
+# bootc-image-builder's x86_64 installer boots BIOS too (an El Torito GRUB
+# i386-pc image and a hybrid MBR); installer/brand-iso.sh rewrites the ISO
+# with xorriso's `-boot_image any replay` and must keep that. The ISO's boot
+# records, then a boot on SeaBIOS to the graphical installer.
+if [[ $machine == x86_64 ]]; then
+    eltorito="$(xorriso -indev "$iso" -report_el_torito plain 2>/dev/null | grep '^El Torito boot img' || true)"
+    echo "El Torito boot images:"; sed 's/^/    /' <<<"$eltorito"
+    if grep -Eq 'boot img : +[0-9]+ +BIOS' <<<"$eltorito"; then
+        summary "ISO has a BIOS El Torito boot image" "ok"
+    else
+        echo "::error::the installer ISO has no BIOS boot image"
+        summary "ISO has a BIOS El Torito boot image" "FAIL"
+        exit 1
+    fi
+    look_boot "$dir/look-bios" bios
+    case "$look_rc" in
+        0) summary "BIOS (SeaBIOS) boot reaches the installer (look-bios/02-installer.png)" "ok: $(head -n1 "$dir/look-bios/look.txt")" ;;
+        1)
+            echo "::error::booted with BIOS, the installer does not show AgentUX's branding; see look-bios/02-installer.png"
+            summary "BIOS (SeaBIOS) boot reaches the installer (look-bios/02-installer.png)" "FAIL: $(tail -n1 "$dir/look-bios/look.txt")"
+            exit 1
+            ;;
+        *)
+            # A slow runner can keep the UEFI boot from the installer too;
+            # only a BIOS boot that alone fails to get there fails the test.
+            if (( uefi_look_rc == 0 )); then
+                echo "::error::booted with BIOS (SeaBIOS), the installer did not appear within ${ISO_TEST_LOOK_TIMEOUT:-420}s; see look-bios/"
+                summary "BIOS (SeaBIOS) boot reaches the installer (look-bios/02-installer.png)" "FAIL: no installer on screen"
+                exit 1
+            fi
+            echo "::warning::booted with BIOS, the installer did not appear (nor with UEFI); see look-bios/"
+            summary "BIOS (SeaBIOS) boot reaches the installer (look-bios/02-installer.png)" "warn: no installer on screen"
+            ;;
+    esac
+fi
 
 # ---- 2. an unattended kickstart --------------------------------------------------
 

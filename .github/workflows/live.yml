@@ -152,6 +152,32 @@ jobs:
         with:
           image-ref: ${{ env.LIVE_IMAGE }}
 
+      # Titanoboa's ISO boots UEFI only. On x86_64, live/bios-iso.sh adds
+      # GRUB for BIOS (El Torito and a hybrid MBR, for CDs and dd-written USB
+      # sticks) with the live image's own GRUB i386-pc modules and an El
+      # Torito core image made by its grub2-mkimage; the UEFI boot, shim and
+      # the menu stay as they are.
+      - name: Add BIOS boot
+        if: matrix.arch == 'x86_64'
+        env:
+          ISO: ${{ steps.titanoboa.outputs.iso-dest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/grub-bios"
+          sudo podman run --rm --security-opt label=disable \
+            -v "$RUNNER_TEMP/grub-bios:/out" "$LIVE_IMAGE" \
+            sh -euxc 'cp -r /usr/lib/grub/i386-pc /out/
+                      grub2-mkimage -O i386-pc-eltorito -d /usr/lib/grub/i386-pc \
+                        -o /out/eltorito.img -p /boot/grub2 iso9660 biosdisk
+                      rpm -q grub2-pc-modules'
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/grub-bios"
+          # Room for the rewritten ISO; the images are not needed anymore.
+          sudo podman rmi --all --force >/dev/null || true
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends xorriso fdisk
+          live/bios-iso.sh "$ISO" "$ISO.bios" "$RUNNER_TEMP/grub-bios"
+          mv "$ISO.bios" "$ISO"
+          echo "x86_64 ISO boots BIOS (GRUB i386-pc El Torito, hybrid MBR) and UEFI" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Name and checksum the ISO
         id: iso
         run: |
@@ -243,14 +269,102 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+  # The x86_64 ISO again, on a legacy BIOS VM (QEMU's SeaBIOS, no OVMF): as
+  # a USB stick written with dd (the hybrid MBR), then from the CD with the
+  # same live checks, the install to the VM's disk and the installed disk's
+  # first boot, all with BIOS. VirtualBox and many other VMs default to BIOS.
+  live-bios:
+    name: live (x86_64, BIOS)
+    needs: [matrix, live]
+    # Also when the UEFI test failed: the ISO is uploaded before it runs.
+    if: ${{ !cancelled() && contains(needs.matrix.outputs.include, 'x86_64') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the channel
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/channel.sh
+
+      # This run's x86_64 ISO, as the live job built and tested it.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.ISO_PREFIX }}-*-x86_64
+          path: ${{ runner.temp }}/iso
+          merge-multiple: true
+
+      - name: Check the ISO
+        id: iso
+        run: |
+          cd "$RUNNER_TEMP/iso"
+          sha256sum --check ./*.iso.sha256
+          iso="$(ls ./*.iso)"
+          echo "path=$RUNNER_TEMP/iso/${iso#./}" >> "$GITHUB_OUTPUT"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          for _ in $(seq 10); do test -w /dev/kvm && break; sleep 1; done
+          test -w /dev/kvm || sudo chmod 0666 /dev/kvm
+          test -w /dev/kvm
+
+      - name: Install QEMU and SeaBIOS
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-system-x86 qemu-utils seabios fdisk
+
+      - name: Boot and test the live ISO with BIOS
+        env:
+          LIVE_TEST_FIRMWARE: bios
+          LIVE_TEST_INSTALL: ${{ (github.event_name != 'workflow_dispatch' || inputs.install-test) && '1' || '0' }}
+          LIVE_TRACK_IMAGE: ${{ env.TRACK_IMAGE }}
+        run: tests/live-vm.sh "${{ steps.iso.outputs.path }}" output/live-test
+
+      - name: Summary
+        if: always()
+        run: |
+          if [[ -f output/live-test/summary.md ]]; then
+            cat output/live-test/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The BIOS live test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-test-x86_64-bios-${{ github.run_id }}
+          path: |
+            output/live-test/*.png
+            output/live-test/boot/
+            output/live-test/usb-boot/
+            output/live-test/installed-boot/
+            output/live-test/*.log
+            output/live-test/*.txt
+            output/live-test/summary.md
+          retention-days: 14
+          if-no-files-found: warn
+
   # The weekly build and a dispatch with publish set go to iso/nightly/ on
   # download.agentuxos.org (.github/scripts/publish-iso.sh), only once every
-  # ISO of the run built and the amd64 one passed its test. Its R2
-  # credentials live in the `nightly` environment, which only main can use.
-  # Tags are published by release.yml, after approval.
+  # ISO of the run built and the amd64 one passed its tests (UEFI and BIOS).
+  # Its R2 credentials live in the `nightly` environment, which only main can
+  # use. Tags are published by release.yml, after approval.
   publish:
-    needs: live
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: [live, live-bios]
+    # live-bios is skipped for an arm64-only dispatch.
+    if: >-
+      ${{ !cancelled() && needs.live.result == 'success'
+      && (needs.live-bios.result == 'success' || needs.live-bios.result == 'skipped')
+      && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: nightly

@@ -5,9 +5,11 @@
 #
 #   live-vm.sh ISO DIR
 #
-# 1. Boot the ISO (UEFI, from the CD, the VM's empty disk behind it), with
-#    screendumps every 2 s of the first two minutes (GRUB, the boot splash)
-#    in DIR/boot/.
+# 1. Boot the ISO (UEFI, or BIOS with LIVE_TEST_FIRMWARE=bios; from the CD,
+#    the VM's empty disk behind it), with screendumps every 2 s of the first
+#    two minutes (GRUB, the boot splash) in DIR/boot/. With BIOS, the ISO is
+#    first booted as a USB stick written with dd (its hybrid MBR) up to the
+#    guest agent, with its frames in DIR/usb-boot/.
 # 2. Wait for the live user's autologin session and check it (tests/live.sh
 #    checks): Plasma and the cockpit, agentuxd with fake agents answering
 #    `aux ps` with the demo runs, no first-login downloads; the installer
@@ -18,21 +20,29 @@
 #    Anaconda from the live system, unattended but with the live installer's
 #    own payload, check the installed deployment (it tracks the channel the
 #    ISO was built for, LIVE_TRACK_IMAGE, and nothing live-only is in it), then boot the disk alone and screenshot
-#    its first boot. The install needs the VM to reach ghcr.io; if it fails,
-#    the job only warns, but a wrong installed system fails it.
+#    its first boot (with the same firmware: an install on a BIOS VM must
+#    leave a BIOS boot partition and GRUB in the disk's MBR). The install
+#    needs the VM to reach ghcr.io; if it fails, the job only warns, but a
+#    wrong installed system fails it.
 #
 # Logs, screenshots and summary.md go to DIR. Needs qemu-system-x86_64 (or
-# -aarch64) with KVM, UEFI firmware (ovmf / qemu-efi-aarch64), qemu-img and
-# python3. LIVE_TEST_MEMORY (MiB, default 12288: the install from the live system
-# runs in RAM) and LIVE_TEST_CPUS (4) size
-# the VM.
+# -aarch64) with KVM, UEFI firmware (ovmf / qemu-efi-aarch64; for
+# LIVE_TEST_FIRMWARE=bios, QEMU's default SeaBIOS), qemu-img and python3.
+# LIVE_TEST_MEMORY (MiB, default 12288: the install from the live system
+# runs in RAM) and LIVE_TEST_CPUS (4) size the VM.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 iso="$(realpath "${1:?usage: live-vm.sh ISO DIR}")"
 dir="$(mkdir -p "${2:?usage: live-vm.sh ISO DIR}" && cd "$2" && pwd)"
 machine="$(uname -m)"
-system_rc=1 install_rc=skipped
+system_rc=1 install_rc=skipped usb_rc=0
+firmware_mode="${LIVE_TEST_FIRMWARE:-uefi}"
+case "$firmware_mode" in
+    uefi) ;;
+    bios) [[ "$(uname -m)" == x86_64 ]] || { echo "BIOS boot is x86_64 only" >&2; exit 2; } ;;
+    *) echo "LIVE_TEST_FIRMWARE must be uefi or bios" >&2; exit 2 ;;
+esac
 
 if [[ "$machine" = aarch64 ]]; then
     firmware=(/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd
@@ -50,28 +60,39 @@ for pair in "${firmware[@]}"; do
         code="${pair%%:*}" vars="${pair##*:}"; break
     fi
 done
-[[ -n "$code" ]] || { echo "UEFI firmware not found" >&2; exit 1; }
+[[ -n "$code" || "$firmware_mode" == bios ]] || { echo "UEFI firmware not found" >&2; exit 1; }
 [[ -w /dev/kvm ]] || { echo "/dev/kvm is not writable; KVM is required" >&2; exit 1; }
 
-rm -rf "${dir:?}/boot" "${dir:?}/installed-boot"
+rm -rf "${dir:?}/boot" "${dir:?}/usb-boot" "${dir:?}/installed-boot"
 rm -f "$dir"/*.png "$dir"/*.log "$dir"/*.txt "$dir/summary.md" "$dir/summary.extra"
-cp "$vars" "$dir/OVMF_VARS.fd"
+# UEFI: OVMF in pflash. BIOS: no pflash, so QEMU's default firmware, SeaBIOS.
+firmware_args=()
+if [[ "$firmware_mode" == uefi ]]; then
+    cp "$vars" "$dir/OVMF_VARS.fd"
+    firmware_args=(-drive if=pflash,format=raw,readonly=on,file="$code"
+                   -drive if=pflash,format=raw,file="$dir/OVMF_VARS.fd")
+fi
 qemu-img create -q -f qcow2 "$dir/disk.qcow2" 64G
 
-# start_vm [cd]: the VM, with the ISO as its CD when asked, the disk always.
+# start_vm [cd|usb]: the VM, with the ISO as its CD or as a USB stick (the
+# ISO's bytes as a disk, as dd writes them; writes go to a throwaway
+# snapshot) when asked, the disk always.
 start_vm() {
     local cd_args=()
     if [[ "${1:-}" == cd ]]; then
         cd_args=(-drive "file=$iso,media=cdrom,if=none,id=cd,readonly=on"
                  -device "scsi-cd,drive=cd,bus=scsi.0,bootindex=0")
+    elif [[ "${1:-}" == usb ]]; then
+        cd_args=(-device qemu-xhci,id=xhci
+                 -drive "file=$iso,format=raw,if=none,id=usb,snapshot=on"
+                 -device "usb-storage,bus=xhci.0,drive=usb,removable=on,bootindex=0")
     fi
     rm -f "$dir/qmp.sock" "$dir/qga.sock"
     "$qemu" \
         -name agentux-live-test \
         -machine "$vm_machine" -cpu host \
         -smp "${LIVE_TEST_CPUS:-4}" -m "${LIVE_TEST_MEMORY:-12288}" \
-        -drive if=pflash,format=raw,readonly=on,file="$code" \
-        -drive if=pflash,format=raw,file="$dir/OVMF_VARS.fd" \
+        "${firmware_args[@]}" \
         -device virtio-scsi-pci,id=scsi \
         "${cd_args[@]}" \
         -drive file="$dir/disk.qcow2",if=none,id=disk,format=qcow2 \
@@ -175,7 +196,7 @@ summary_phase() {
 }
 
 {
-    echo "## AgentUX live ISO test"
+    echo "## AgentUX live ISO test ($([[ $firmware_mode == bios ]] && echo "BIOS: SeaBIOS" || echo UEFI))"
     echo
     echo "ISO: \`$(basename "$iso")\` ($(du -h "$iso" | cut -f1))"
     echo
@@ -188,8 +209,37 @@ finish() {
     rm -f "$dir/summary.extra"
     local f names=()
     for f in "$dir"/*.png; do [[ -e "$f" ]] && names+=("$(basename "$f")"); done
-    printf '\nScreenshots (artifact): %s; boot frames in boot/\n' "${names[*]}" >>"$dir/summary.md"
+    printf '\nScreenshots (artifact): %s; boot frames in boot/%s\n' "${names[*]}" \
+        "$([[ $firmware_mode == bios ]] && echo ", usb-boot/ (USB stick) and installed-boot/")" >>"$dir/summary.md"
 }
+
+# ---- 0. BIOS: the ISO as a dd-written USB stick ------------------------------
+
+if [[ "$firmware_mode" == bios ]]; then
+    # SeaBIOS boots the stick's hybrid MBR (GRUB's boot_hybrid.img), which
+    # loads the El Torito core image; the live system then finds its root by
+    # the label on the stick. Up to the guest agent, then the CD path below.
+    start_vm usb
+    capture_frames usb-boot 120
+    if wait_agent "${LIVE_TEST_BOOT_TIMEOUT:-900}"; then
+        cmdline="$(guest_cmd 30 'cat /proc/cmdline; test ! -d /sys/firmware/efi && echo "(no EFI: booted by BIOS)"' 2>/dev/null || true)"
+        echo "USB stick (BIOS): guest agent up after ${waited}s; $cmdline"
+        if [[ "$cmdline" == *rd.live.image*"booted by BIOS"* ]]; then
+            summary_line "BIOS boot from the ISO written to a USB stick" "ok after ${waited}s (usb-boot/, 00-usb-bios-live.png)"
+        else
+            summary_line "BIOS boot from the ISO written to a USB stick" "FAIL: not a BIOS-booted live system ($cmdline)"
+            usb_rc=1
+        fi
+        sleep 30
+        screenshot 00-usb-bios-live
+    else
+        echo "::error::the ISO written to a USB stick did not boot with BIOS; see usb-boot/ and serial-usb.log"
+        screenshot 00-usb-bios-no-agent
+        summary_line "BIOS boot from the ISO written to a USB stick" "FAIL (usb-boot/)"
+        usb_rc=1
+    fi
+    stop_vm
+fi
 
 # ---- 1. boot ---------------------------------------------------------------
 
@@ -202,7 +252,7 @@ if ! wait_agent "${LIVE_TEST_BOOT_TIMEOUT:-900}"; then
     finish
     exit 1
 fi
-summary_line "Boot to guest agent" "ok after ${waited}s"
+summary_line "Boot from the CD to guest agent ($firmware_mode)" "ok after ${waited}s"
 echo "guest agent up after ${waited}s"
 
 # ---- 2. live session ---------------------------------------------------------
@@ -321,7 +371,8 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
         track_image=ghcr.io/agentux-os/agentux:latest
         [[ "$(basename "$iso")" == *hyprland* ]] && track_image=ghcr.io/agentux-os/agentux-hyprland:latest
     fi
-    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TRACK_IMAGE="$track_image" bash "$here/live.sh" | tee "$dir/install-verify.log"
+    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TRACK_IMAGE="$track_image" LIVE_FIRMWARE="$firmware_mode" \
+        bash "$here/live.sh" | tee "$dir/install-verify.log"
     verify_rc=${PIPESTATUS[0]}
     sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
     set -e
@@ -349,4 +400,5 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
 fi
 
 finish
+(( usb_rc == 0 )) || system_rc=1
 exit "$system_rc"
