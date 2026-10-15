@@ -1,28 +1,31 @@
 name: Release
 
-# A v* tag, from build to the stable channel:
+# A v* tag, from main's tested image to the stable channel. Build once,
+# promote: the release builds no image. It ships the very digest that main
+# built, signed, smoke-tested and published for the tagged commit
+# (sha-<commit>, see build.yml), so :stable is exactly what was tested and
+# not a fresh build that would pull newer Fedora packages.
 #
-#   1. build     both images, for both architectures, from the tagged commit
-#                (build.yml): smoke-tested, signed (keyless and with the
-#                AgentUX key) and checked against the shipped policy, then
-#                pushed as candidate-<tag>. Nothing public moves.
-#   2. candidate the tag must be on main; resolve candidate-<tag> to its
-#                digests once, so everything after builds from and promotes
-#                exactly those.
-#   3. iso, live the installer and live ISOs (plasma, x86_64 and aarch64),
-#                built from the candidate digest and following :stable; the
-#                x86_64 live ISO is booted and installed in a VM.
-#   4. release   waits for the owner's approval (the `release` environment:
+#   1. candidate the tag must be on main and main must have published
+#                sha-<commit> for it; resolve both images to their digests
+#                once and check their signatures (the AgentUX key and
+#                keyless).
+#   2. boot      boot.yml boots that plasma digest in QEMU/KVM and runs
+#                tests/boot.sh on it.
+#      iso, live the installer and live ISOs (plasma, x86_64 and aarch64),
+#                built from the same digest and following :stable; the
+#                x86_64 ones are installed in a VM. ISOs are only built here.
+#   3. release   waits for the owner's approval (the `release` environment:
 #                v* tags only, wendelmax as required reviewer), then moves
-#                :<tag> and :stable to the candidate digests, publishes the
-#                ISOs in iso/<tag>/ and iso/stable/ on download.agentuxos.org
-#                (with a signed SHA256SUMS in each), creates the GitHub
-#                release and points latest.json at it.
+#                :<tag> and :stable to the digests, publishes the ISOs in
+#                iso/<tag>/ and iso/stable/ on download.agentuxos.org (with a
+#                signed SHA256SUMS in each), creates the GitHub release and
+#                points latest.json at it.
 #
-# Approving is the last step, after every build and test of the tag passed;
-# rejecting it (or letting it time out) leaves :stable, the downloads and the
-# releases untouched. :latest is not involved: it stays the nightly channel
-# that build.yml moves from main.
+# Approving is the last step, after every test of the tag passed; rejecting
+# it (or letting it time out) leaves :stable, the downloads and the releases
+# untouched. :latest is not involved: it stays the nightly channel that
+# build.yml moves from main.
 on:
   push:
     tags: ["v*"]
@@ -34,16 +37,7 @@ concurrency:
 permissions: {}
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    secrets: inherit
-
   candidate:
-    needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -67,21 +61,41 @@ jobs:
 
       - uses: sigstore/cosign-installer@v4.1.2
 
-      - name: Resolve the candidate digests
+      # build.yml tags sha-<commit> only after the image passed the smoke
+      # tests and its signatures were checked against the shipped policy.
+      - name: Resolve main's image for the tagged commit
         id: digests
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
           echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          tag="sha-${GITHUB_SHA::12}"
           for pair in plasma=agentux hyprland=agentux-hyprland; do
             repo="ghcr.io/$OWNER/${pair#*=}"
-            digest="sha256:$(skopeo inspect --raw --creds "${{ github.actor }}:$TOKEN" "docker://$repo:candidate-$GITHUB_REF_NAME" | sha256sum | cut -d' ' -f1)"
+            if ! raw="$(skopeo inspect --raw --creds "${{ github.actor }}:$TOKEN" "docker://$repo:$tag")"; then
+              echo "::error::$repo:$tag does not exist: main has not published an image for $GITHUB_SHA (wait for its Build image run, or tag a commit that has one)"
+              exit 1
+            fi
+            digest="sha256:$(printf '%s' "$raw" | sha256sum | cut -d' ' -f1)"
             cosign verify --key files/etc/pki/containers/agentux-os.pub "$repo@$digest" > /dev/null
-            echo "$repo:candidate-$GITHUB_REF_NAME -> $digest (signed)"
+            cosign verify "$repo@$digest" \
+              --certificate-identity-regexp "^https://github.com/$GITHUB_REPOSITORY/\.github/workflows/build\.yml@refs/heads/main$" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+            echo "$repo:$tag -> $digest (signed with the AgentUX key and by main's build.yml)"
             echo "${pair%%=*}=$digest" >> "$GITHUB_OUTPUT"
-            echo "- \`$repo@$digest\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- \`$repo@$digest\` (\`$tag\`)" >> "$GITHUB_STEP_SUMMARY"
           done
+
+  # The image the release ships, booted for real.
+  boot:
+    needs: candidate
+    uses: ./.github/workflows/boot.yml
+    permissions:
+      contents: read
+      packages: read
+    with:
+      image: ghcr.io/${{ github.repository_owner }}/agentux@${{ needs.candidate.outputs.plasma }}
 
   iso:
     needs: candidate
@@ -114,7 +128,7 @@ jobs:
   # environment. Its R2 credentials (and a copy of the signing key) are
   # environment secrets, so only an approved v* tag run can publish.
   release:
-    needs: [candidate, iso, live]
+    needs: [candidate, boot, iso, live]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     environment:
