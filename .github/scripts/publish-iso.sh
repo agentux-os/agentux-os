@@ -190,6 +190,9 @@ sums() {
 if [[ -n $versioned ]]; then sums "$versioned"; fi
 sums "$channel"
 
+# The directory pages (R2 lists nothing by itself).
+"$(dirname "$0")/download-index.sh"
+
 [[ $mode == release ]] || exit 0
 
 # ---- the GitHub release ------------------------------------------------------
@@ -275,3 +278,6 @@ s3 cp latest.json "s3://$bucket/latest.json" --content-type application/json --c
 s3 cp latest.json.sigstore.json "s3://$bucket/latest.json.sigstore.json" \
     --content-type application/json --cache-control "$short"
 echo "- [\`latest.json\`]($base/latest.json) now names $tag" >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+# Again, so / lists latest.json from the first release on.
+"$(dirname "$0")/download-index.sh"

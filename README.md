@@ -209,6 +209,8 @@ ISOs are published on **download.agentuxos.org**, a Cloudflare R2 bucket: GitHub
 
 Releases are published by [`release.yml`](.github/workflows/release.yml) after the owner approves the tag (see [How a release reaches `:stable`](#how-a-release-reaches-stable)); the weekly builds by the `publish` job of [`iso.yml`](.github/workflows/iso.yml) and [`live.yml`](.github/workflows/live.yml). A nightly copy's `x-amz-meta-build` header names the dated build it came from.
 
+R2 serves objects, not directories, so every directory has an `index.html` listing what is there ([`.github/scripts/download-index.sh`](.github/scripts/download-index.sh), rebuilt after every publish), and a URL rewrite rule on the `agentuxos.org` zone (Transform Rules, `http_request_transform`) serves `<path>/index.html` for any `download.agentuxos.org/<path>/`. Browse [download.agentuxos.org/iso/](https://download.agentuxos.org/iso/).
+
 Next to every ISO is `<name>.iso.sha256` (naming the file next to it) and `<name>.iso.sha256.sigstore.json`, a cosign signature of the checksum with the key that signs the images:
 
 ```sh
