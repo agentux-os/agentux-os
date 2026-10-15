@@ -59,6 +59,15 @@ Build once, promote: a release builds no image. It ships the digest that `main` 
 4. **Approval.** The `release` job waits in the `release` [environment](https://docs.github.com/actions/deployment/targeting-different-environments/using-environments-for-deployment), which only `v*` tags can use and which needs the repository owner's approval. Approving it is the last step, after every test of the tag passed. Rejecting it, or letting it time out, publishes nothing. Approve within 14 days: the release job publishes the ISO artifacts the run built and tested, which expire then (re-run the workflow after that).
 5. **Promotion and publishing.** On approval, `:<tag>` and `:stable` of both images are pointed at the candidate digests ([`.github/scripts/promote.sh`](.github/scripts/promote.sh): a copy of the signed manifest list with its digest preserved, so the signatures, which are stored by digest, carry over; the key and keyless signatures are verified again on the new tags and on each architecture's image). Then the ISOs go to `iso/<tag>/` and `iso/stable/` on download.agentuxos.org, and the GitHub release is created.
 
+To cut and approve a release from a terminal (Git Bash on Windows works too; needs `gh` logged in as the owner):
+
+```sh
+scripts/release.sh 0.5.2   # checks main's sha-<commit> images exist, shows the changes, pushes v0.5.2
+scripts/approve.sh         # after the tests pass: shows the waiting run, asks, approves it
+```
+
+(`just release 0.5.2` and `just approve` run the same.) A version is never re-tagged: if a release run fails, fix it on `main` and tag the next patch version.
+
 ### Signing and approval: what the gate does and does not do
 
 One AgentUX key signs every image, nightly or release, and installed systems' policy accepts any image in the AgentUX repositories signed with it, whatever its tag: `containers/image` checks signatures per repository and by digest, and cosign signs digests, not tags. The nightly channel must stay signed with that key (every installed system so far follows `:latest` and refuses anything else), so the key cannot move behind the approval: build.yml signs every build of `main` with it, and stays a repository secret (`COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`).
