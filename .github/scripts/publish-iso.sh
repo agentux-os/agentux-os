@@ -44,6 +44,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd) # the script cds into DIR below
+# gh works from DIR, which is not a git checkout: name the repository.
+export GH_REPO=${GH_REPO:-${GITHUB_REPOSITORY:-agentux-os/agentux-os}}
 mode=${1:?usage: publish-iso.sh nightly|release DIR}
 dir=$(cd "${2:?usage: publish-iso.sh nightly|release DIR}" && pwd)
 bucket=agentux-downloads
