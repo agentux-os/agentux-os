@@ -37,8 +37,14 @@ RUN dnf -y install \
         uv \
     && dnf clean all
 
-# The COSMIC variant starts from Fedora's own COSMIC Atomic bootc image. Do not
-# recreate its desktop package set here; fail early if a wrong base was passed.
+# Fedora's COSMIC Atomic base already supplies the desktop. Add only the
+# Anaconda/Initial Setup bridge required by AgentUX's live installer.
+RUN if [ "$VARIANT" = cosmic ]; then \
+        dnf -y install initial-setup-gui initial-setup-gui-wayland-cosmic \
+        && dnf clean all; \
+    fi
+
+# Fail early if a wrong base or an incomplete installer integration was passed.
 RUN if [ "$VARIANT" = cosmic ]; then \
         rpm -q cosmic-session || { echo "COSMIC Atomic base is missing the cosmic-session RPM" >&2; exit 1; }; \
         test -x /usr/bin/start-cosmic || { echo "COSMIC Atomic base is missing /usr/bin/start-cosmic" >&2; exit 1; }; \
