@@ -280,14 +280,17 @@ echo "::endgroup::"
 summary_phase "Live session checks" "$system_rc" "$dir/live-checks.log"
 screenshot 02-live-desktop-later
 
-if qemu-img compare -f qcow2 "$dir/disk-before-live.qcow2" "$dir/disk.qcow2"; then
+# QEMU owns the live disk's write lock. Pause guest I/O, then allow qemu-img
+# to open the image read-only alongside QEMU for a consistent comparison.
+python3 "$here/qga.py" qmp "$dir/qmp.sock" '{"execute": "stop"}'
+if qemu-img compare -U -f qcow2 "$dir/disk-before-live.qcow2" "$dir/disk.qcow2"; then
     summary_line "Persistent disk unchanged before install" "ok"
 else
     echo "FAIL live session changed the persistent install disk before install"
     summary_line "Persistent disk unchanged before install" "FAIL"
     system_rc=1
 fi
-
+python3 "$here/qga.py" qmp "$dir/qmp.sock" '{"execute": "cont"}'
 # The desktop behind the cockpit: the launchers and the note (Plasma's Show
 # Desktop, toggled on and off again).
 show_desktop() {
