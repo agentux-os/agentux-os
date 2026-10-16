@@ -22,7 +22,7 @@ const readme = await readFile(resolve(root, 'README.md'), 'utf8');
 const resolver = await readFile(resolve(root, '.github/scripts/resolve-cosmic-base.sh'), 'utf8');
 assert.match(containerfile, /plasma\|hyprland\|cosmic/, 'Containerfile accepts the cosmic variant');
 assert.match(containerfile, /cosmic\)\s+image=agentux-cosmic/, 'COSMIC has a distinct image identity');
-assert.match(containerfile, /rpm -q --quiet cosmic-session/, 'COSMIC build validates the upstream COSMIC Atomic base');
+assert.match(containerfile, /rpm -q cosmic-session/, 'COSMIC build validates the upstream COSMIC Atomic base');
 assert.doesNotMatch(containerfile, /cosmic-packages|cosmic-atomic\.yaml|dnf -y install initial-setup-gui/, 'COSMIC packages are not duplicated on top of the upstream Atomic base');
 assert.match(containerfile, /io\.github\.agentux-os\.base-image="\$\{BASE_IMAGE\}"/, 'built image records the exact base image reference');
 assert.match(containerfile, /common="agentux-common-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs the shared AgentUX overlay');

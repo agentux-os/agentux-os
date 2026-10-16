@@ -40,9 +40,9 @@ RUN dnf -y install \
 # The COSMIC variant starts from Fedora's own COSMIC Atomic bootc image. Do not
 # recreate its desktop package set here; fail early if a wrong base was passed.
 RUN if [ "$VARIANT" = cosmic ]; then \
-        rpm -q --quiet cosmic-session \
-        && test -x /usr/bin/start-cosmic \
-        && test -x /usr/libexec/initial-setup/run-gui-backend; \
+        rpm -q cosmic-session || { echo "COSMIC Atomic base is missing the cosmic-session RPM" >&2; exit 1; }; \
+        test -x /usr/bin/start-cosmic || { echo "COSMIC Atomic base is missing /usr/bin/start-cosmic" >&2; exit 1; }; \
+        test -x /usr/libexec/initial-setup/run-gui-backend || { echo "COSMIC Atomic base is missing Fedora Initial Setup GUI backend" >&2; exit 1; }; \
     fi
 
 # AgentUX itself, pinned to GitHub releases in this one place.
