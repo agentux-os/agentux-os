@@ -6,6 +6,7 @@
 
 # "Install AgentUX" replaces Fedora's "Install to Hard Drive". COSMIC also
 # gets a separate live-demo launcher; Plasma keeps its desktop note and layout.
+# shellcheck source=/dev/null
 . /usr/lib/os-release
 rm -f /home/liveuser/Desktop/liveinst.desktop \
     /home/liveuser/.local/share/applications/liveinst.desktop
