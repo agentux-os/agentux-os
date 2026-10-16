@@ -46,7 +46,7 @@ RUN --mount=type=bind,source=variants,target=/tmp/variants \
     && test -s "$manifest" \
     && packages="$(sed -n 's/^  - //p' "$manifest")" \
     && test -n "$packages" \
-    && dnf -y install $packages initial-setup-gui initial-setup-gui-wayland-cosmic \
+    && printf '%s\n' "$packages" | xargs -r dnf -y install initial-setup-gui initial-setup-gui-wayland-cosmic \
     && dnf clean all \
     && test -x /usr/libexec/initial-setup/run-gui-backend
 
