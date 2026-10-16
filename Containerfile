@@ -73,18 +73,21 @@ RUN arch="$(uname -m)" \
         "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
         "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
     && dnf clean all \
+    && test -n "$AGENTUX_COMMON_SHA256" \
+    && common="agentux-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$common" -o "/tmp/$common" \
+    && printf '%s  %s\n' "$AGENTUX_COMMON_SHA256" "/tmp/$common" > /tmp/common.sha256 \
+    && sha256sum --check --strict /tmp/common.sha256 \
+    && tar -xzf "/tmp/$common" -C / --no-same-owner --no-overwrite-dir \
+    && rm -f "/tmp/$common" /tmp/common.sha256 \
     && if [ "$VARIANT" = cosmic ]; then \
-        test -n "$AGENTUX_COMMON_SHA256" && test -n "$AGENTUX_COSMIC_SHA256" \
-        && common="agentux-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        test -n "$AGENTUX_COSMIC_SHA256" \
         && cosmic="agentux-cosmic-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
-        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$common" -o "/tmp/$common" \
         && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$cosmic" -o "/tmp/$cosmic" \
-        && printf '%s  %s\n' "$AGENTUX_COMMON_SHA256" "/tmp/$common" > /tmp/common.sha256 \
         && printf '%s  %s\n' "$AGENTUX_COSMIC_SHA256" "/tmp/$cosmic" > /tmp/cosmic.sha256 \
-        && sha256sum --check --strict /tmp/common.sha256 /tmp/cosmic.sha256 \
-        && tar -xzf "/tmp/$common" -C / --no-same-owner --no-overwrite-dir \
+        && sha256sum --check --strict /tmp/cosmic.sha256 \
         && tar -xzf "/tmp/$cosmic" -C / --no-same-owner --no-overwrite-dir \
-        && rm -f "/tmp/$common" "/tmp/$cosmic" /tmp/common.sha256 /tmp/cosmic.sha256; \
+        && rm -f "/tmp/$cosmic" /tmp/cosmic.sha256; \
     else \
         plasma="/tmp/agentux-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
         && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/${plasma#/tmp/}" -o "$plasma" \

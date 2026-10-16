@@ -33,6 +33,10 @@ assert.match(containerfile, /cosmic\)\s+image=agentux-cosmic/, 'COSMIC has a dis
 assert.match(containerfile, /rpm -q --quiet plasma-workspace/, 'COSMIC build rejects a Plasma base image');
 assert.match(containerfile, /common="agentux-common-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs the shared AgentUX overlay');
 assert.match(containerfile, /cosmic="agentux-cosmic-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs its own desktop overlay');
+const overlayInstall = containerfile.slice(containerfile.indexOf('# AgentUX itself'));
+const sharedOverlayExtraction = overlayInstall.indexOf('tar -xzf "/tmp/$common"');
+const cosmicOverlayBranch = overlayInstall.indexOf('&& if [ "$VARIANT" = cosmic ]; then');
+assert.ok(sharedOverlayExtraction >= 0 && sharedOverlayExtraction < cosmicOverlayBranch, 'shared AgentUX overlay is installed for every desktop variant');
 assert.match(containerfile, /^ARG AGENTUX_PLASMA_SHA256=[a-f0-9]{64}$/m, 'Plasma overlay checksum is pinned');
 assert.match(containerfile, /^ARG AGENTUX_COMMON_SHA256=[a-f0-9]{64}$/m, 'shared overlay checksum is pinned');
 assert.match(containerfile, /^ARG AGENTUX_COSMIC_SHA256=[a-f0-9]{64}$/m, 'COSMIC overlay checksum is pinned');
@@ -47,6 +51,7 @@ assert.doesNotMatch(manifest, /plasma|kde/i, 'COSMIC package set contains no Pla
 assert.match(smoke, /cosmic\) image_id=agentux-cosmic/, 'smoke test recognizes the COSMIC image ID');
 assert.match(smoke, /IMAGE_ID.*agentux-cosmic.*echo cosmic/s, 'smoke test infers COSMIC when no variant is passed');
 assert.match(smoke, /COSMIC session is installed/, 'smoke test checks for the COSMIC session');
+assert.match(smoke, /accent_palette_dark\.ron/, 'smoke test checks the published COSMIC dark accent palette filename');
 assert.match(smoke, /Exec=\/usr\/bin\/start-cosmic/, 'smoke test checks the upstream COSMIC session launcher');
 assert.match(installKs, /^@FIRSTBOOT_DIRECTIVE@$/m, 'install kickstart has a variant-specific firstboot slot');
 assert.match(liveBuild, /firstboot --enable/, 'COSMIC live build enables Fedora Initial Setup for the installed system');

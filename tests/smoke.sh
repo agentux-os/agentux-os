@@ -152,7 +152,7 @@ if [[ "$variant" == cosmic ]]; then
     assert "COSMIC Anaconda Initial Setup backend is installed" \
         test -x /usr/libexec/initial-setup/run-gui-backend
     assert "COSMIC dark accent palette is installed" \
-        test -f /usr/share/cosmic/com.system76.CosmicSettings/v1/accent_palette_dark
+        test -f /usr/share/cosmic/com.system76.CosmicSettings/v1/accent_palette_dark.ron
 else
     assert "Plasma look-and-feel os.agentux.desktop" \
         test -e /usr/share/plasma/look-and-feel/os.agentux.desktop/metadata.json
