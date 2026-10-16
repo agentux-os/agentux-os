@@ -35,6 +35,7 @@ assert.match(containerfile, /cosmic="agentux-cosmic-\$\{AGENTUX_DESKTOP_VERSION\
 assert.match(containerfile, /^ARG AGENTUX_PLASMA_SHA256=[a-f0-9]{64}$/m, 'Plasma overlay checksum is pinned');
 assert.match(containerfile, /^ARG AGENTUX_COMMON_SHA256=[a-f0-9]{64}$/m, 'shared overlay checksum is pinned');
 assert.match(containerfile, /^ARG AGENTUX_COSMIC_SHA256=[a-f0-9]{64}$/m, 'COSMIC overlay checksum is pinned');
+assert.match(containerfile, /printf '%s\\n' "\$packages" \| xargs -r dnf -y install/, 'COSMIC package names are passed without unsafe shell word splitting');
 assert.match(manifest, /^  - cosmic-session$/m, 'official package set includes cosmic-session');
 assert.match(manifest, /^  - cosmic-initial-setup$/m, 'official package set includes the COSMIC first-run app');
 assert.doesNotMatch(manifest, /plasma|kde/i, 'COSMIC package set contains no Plasma/KDE package');
