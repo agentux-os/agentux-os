@@ -40,6 +40,7 @@ assert.match(containerfile, /printf '%s\\n' "\$packages" > \/tmp\/cosmic-package
 assert.match(containerfile, /xargs -r dnf -y install[^\n]+< \/tmp\/cosmic-packages/, 'COSMIC package names are passed without unsafe shell word splitting');
 assert.match(containerfile, /if systemctl --global cat grub-boot-success\.timer/, 'build only disables the optional GRUB timer when the base provides it');
 assert.match(bootTests, /agentux-cosmic[\s\S]*grub-boot-success\.timer|grub-boot-success\.timer[\s\S]*agentux-cosmic/, 'boot test accounts for COSMIC base not shipping the optional GRUB timer');
+assert.match(bootTests, /\. \/etc\/os-release/, 'boot test reads the image identity before applying variant-specific checks');
 assert.match(manifest, /^  - cosmic-session$/m, 'official package set includes cosmic-session');
 assert.match(manifest, /^  - cosmic-initial-setup$/m, 'official package set includes the COSMIC first-run app');
 assert.doesNotMatch(manifest, /plasma|kde/i, 'COSMIC package set contains no Plasma/KDE package');
