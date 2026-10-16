@@ -48,12 +48,10 @@ jobs:
             arch: amd64
             runner: ubuntu-24.04
             image: agentux-cosmic
-            base_image: quay.io/fedora/fedora-bootc@sha256:f2d97f1e70d557d05900d6eba9c37a29ccff9aeaf0785ba661047492cd0136bc
           - variant: cosmic
             arch: arm64
             runner: ubuntu-24.04-arm
             image: agentux-cosmic
-            base_image: quay.io/fedora/fedora-bootc@sha256:3588110b39357b21348ab8c6e8ce7aa50c813b92a930118e06d89ca389cc0287
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -66,11 +64,21 @@ jobs:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
+      - name: Resolve COSMIC Atomic base
+        id: cosmic-base
+        if: matrix.variant == 'cosmic'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          image="$(.github/scripts/resolve-cosmic-base.sh "$ARCH")"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Resolved Fedora COSMIC Atomic ($ARCH): \`$image\` (upstream Quay retention: 4 weeks)." >> "$GITHUB_STEP_SUMMARY"
+
       # quay.io's CDN drops blob downloads now and then; pull the base with
       # retries so `podman build` starts from a local copy.
       - name: Pull the base image
         env:
-          BASE_IMAGE: ${{ matrix.base_image }}
+          BASE_IMAGE: ${{ steps.cosmic-base.outputs.image }}
           VARIANT: ${{ matrix.variant }}
         run: |
           if [ "$VARIANT" = cosmic ]; then .github/scripts/pull.sh "$BASE_IMAGE"
@@ -82,7 +90,7 @@ jobs:
       # the release name is not in it (ADR 0012, agentux-version).
       - name: Build
         env:
-          BASE_IMAGE: ${{ matrix.base_image }}
+          BASE_IMAGE: ${{ steps.cosmic-base.outputs.image }}
           VARIANT: ${{ matrix.variant }}
         run: |
           args=(--build-arg "VARIANT=$VARIANT")
@@ -352,11 +360,9 @@ jobs:
           - variant: cosmic
             arch: amd64
             runner: ubuntu-24.04
-            base_image: quay.io/fedora/fedora-bootc@sha256:f2d97f1e70d557d05900d6eba9c37a29ccff9aeaf0785ba661047492cd0136bc
           - variant: cosmic
             arch: arm64
             runner: ubuntu-24.04-arm
-            base_image: quay.io/fedora/fedora-bootc@sha256:3588110b39357b21348ab8c6e8ce7aa50c813b92a930118e06d89ca389cc0287
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -367,11 +373,21 @@ jobs:
       - name: Free disk space
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 
+      - name: Resolve COSMIC Atomic base
+        id: cosmic-base
+        if: matrix.variant == 'cosmic'
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          image="$(.github/scripts/resolve-cosmic-base.sh "$ARCH")"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Resolved Fedora COSMIC Atomic ($ARCH): \`$image\` (upstream Quay retention: 4 weeks)." >> "$GITHUB_STEP_SUMMARY"
+
       # quay.io's CDN drops blob downloads now and then; pull the base with
       # retries so `podman build` starts from a local copy.
       - name: Pull the base image
         env:
-          BASE_IMAGE: ${{ matrix.base_image }}
+          BASE_IMAGE: ${{ steps.cosmic-base.outputs.image }}
           VARIANT: ${{ matrix.variant }}
         run: |
           if [ "$VARIANT" = cosmic ]; then .github/scripts/pull.sh "$BASE_IMAGE"
@@ -379,7 +395,7 @@ jobs:
 
       - name: Build
         env:
-          BASE_IMAGE: ${{ matrix.base_image }}
+          BASE_IMAGE: ${{ steps.cosmic-base.outputs.image }}
           VARIANT: ${{ matrix.variant }}
         run: |
           args=(--build-arg "VARIANT=$VARIANT")

@@ -37,20 +37,13 @@ RUN dnf -y install \
         uv \
     && dnf clean all
 
-# COSMIC Atomic is not currently a demonstrated bootc base in this pipeline.
-# Reproduce Fedora's generated direct package list on Fedora bootc instead.
-RUN --mount=type=bind,source=variants,target=/tmp/variants \
-    if [ "$VARIANT" != cosmic ]; then exit 0; fi \
-    && if rpm -q --quiet plasma-workspace; then echo "COSMIC variant cannot use a Plasma base image" >&2; exit 1; fi \
-    && manifest=/tmp/variants/cosmic/cosmic-atomic.yaml \
-    && test -s "$manifest" \
-    && packages="$(sed -n 's/^  - //p' "$manifest")" \
-    && test -n "$packages" \
-    && printf '%s\n' "$packages" > /tmp/cosmic-packages \
-    && xargs -r dnf -y install initial-setup-gui initial-setup-gui-wayland-cosmic < /tmp/cosmic-packages \
-    && rm /tmp/cosmic-packages \
-    && dnf clean all \
-    && test -x /usr/libexec/initial-setup/run-gui-backend
+# The COSMIC variant starts from Fedora's own COSMIC Atomic bootc image. Do not
+# recreate its desktop package set here; fail early if a wrong base was passed.
+RUN if [ "$VARIANT" = cosmic ]; then \
+        rpm -q --quiet cosmic-session \
+        && test -x /usr/bin/start-cosmic \
+        && test -x /usr/libexec/initial-setup/run-gui-backend; \
+    fi
 
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
@@ -374,6 +367,7 @@ LABEL org.opencontainers.image.title="AgentUX" \
       org.opencontainers.image.version="${AGENTUX_VERSION}" \
       org.opencontainers.image.revision="${AGENTUX_COMMIT}" \
       io.github.agentux-os.variant="${VARIANT}" \
+      io.github.agentux-os.base-image="${BASE_IMAGE}" \
       containers.bootc="1"
 
 RUN bootc container lint

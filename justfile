@@ -10,9 +10,15 @@ titanoboa := "ghcr.io/ublue-os/titanoboa:latest"
 default:
     @just --list
 
-# Build the image into your podman storage; variant is plasma (ghcr.io/agentux-os/agentux) or hyprland (agentux-hyprland)
+# Build the image into podman's storage; COSMIC resolves Fedora's nightly Atomic base for this host architecture.
 build variant="plasma":
-    podman build --build-arg VARIANT={{ variant }} --tag {{ image }} .
+    if [ "{{ variant }}" = cosmic ]; then \
+        case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; *) echo "unsupported host architecture" >&2; exit 2 ;; esac; \
+        base="$(.github/scripts/resolve-cosmic-base.sh "$arch")"; \
+        podman build --build-arg VARIANT=cosmic --build-arg "BASE_IMAGE=$base" --tag {{ image }} .; \
+    else \
+        podman build --build-arg VARIANT={{ variant }} --tag {{ image }} .; \
+    fi
 
 # Build an Anaconda installer ISO from the local image (output/bootiso/install.iso)
 iso: (_bib "anaconda-iso" "disk_config/iso.toml")
