@@ -327,8 +327,8 @@ RUN chmod 0755 /usr/libexec/agentux/grub-theme \
     && test -f /usr/share/agentux/grub/theme.txt \
     && test -f /usr/share/agentux/grub/background.png \
     && systemctl enable agentux-grub-theme.service \
-    && systemctl --global disable grub-boot-success.timer \
-    && systemctl --global mask grub-boot-success.service \
+    && if systemctl --global cat grub-boot-success.timer >/dev/null 2>&1; then systemctl --global disable grub-boot-success.timer; fi \
+    && if systemctl --global cat grub-boot-success.service >/dev/null 2>&1; then systemctl --global mask grub-boot-success.service; fi \
     && test ! -e /etc/systemd/user/timers.target.wants/grub-boot-success.timer
 
 # Updates of this image (bootc upgrade/switch pull through containers/image)
