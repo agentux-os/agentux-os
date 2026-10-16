@@ -8,10 +8,10 @@ on:
     - cron: "0 6 * * *" # daily, to pick up Fedora updates
   workflow_dispatch:
 
-# Two images from the one Containerfile (build arg VARIANT): plasma is
-# ghcr.io/<owner>/agentux, hyprland is ghcr.io/<owner>/agentux-hyprland. Each
-# job below runs once per variant (and architecture), with IMAGE set to that
-# variant's repository; both are published, signed and checked the same way.
+# Three images from the one Containerfile (build arg VARIANT): Plasma,
+# Hyprland, and COSMIC each have a separate repository. All are built and
+# signed on nightly/test channels; release.yml deliberately promotes only
+# Plasma and Hyprland until COSMIC passes its launch gate.
 env:
   # Pushes from main (push, schedule, dispatch) publish, once signed,
   # verified and smoke-tested, a dated tag, sha-<commit> and :latest. A
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [plasma, hyprland]
+        variant: [plasma, hyprland, cosmic]
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -44,6 +44,16 @@ jobs:
             image: agentux
           - variant: hyprland
             image: agentux-hyprland
+          - variant: cosmic
+            arch: amd64
+            runner: ubuntu-24.04
+            image: agentux-cosmic
+            base_image: quay.io/fedora/fedora-bootc@sha256:f2d97f1e70d557d05900d6eba9c37a29ccff9aeaf0785ba661047492cd0136bc
+          - variant: cosmic
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            image: agentux-cosmic
+            base_image: quay.io/fedora/fedora-bootc@sha256:3588110b39357b21348ab8c6e8ce7aa50c813b92a930118e06d89ca389cc0287
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -59,15 +69,25 @@ jobs:
       # quay.io's CDN drops blob downloads now and then; pull the base with
       # retries so `podman build` starts from a local copy.
       - name: Pull the base image
-        run: .github/scripts/pull.sh
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          if [ "$VARIANT" = cosmic ]; then .github/scripts/pull.sh "$BASE_IMAGE"
+          else .github/scripts/pull.sh; fi
 
       # The image's own version (os-release IMAGE_VERSION, the
       # org.opencontainers.image.version label): the build's date and commit,
       # e.g. 2026.10.15.063578e. A release promotes this image unchanged, so
       # the release name is not in it (ADR 0012, agentux-version).
       - name: Build
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+          VARIANT: ${{ matrix.variant }}
         run: |
-          podman build --build-arg VARIANT=${{ matrix.variant }} \
+          args=(--build-arg "VARIANT=$VARIANT")
+          if [ "$VARIANT" = cosmic ]; then args+=(--build-arg "BASE_IMAGE=$BASE_IMAGE"); fi
+          podman build "${args[@]}" \
             --build-arg AGENTUX_VERSION="$(date -u +%Y.%m.%d).${GITHUB_SHA::7}" \
             --build-arg AGENTUX_COMMIT="$GITHUB_SHA" \
             --tag agentux:ci .
@@ -117,6 +137,8 @@ jobs:
             image: agentux
           - variant: hyprland
             image: agentux-hyprland
+          - variant: cosmic
+            image: agentux-cosmic
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     # Main's runs share the ci-staging tags; one at a time per repository.
@@ -320,13 +342,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [plasma, hyprland]
+        variant: [plasma, hyprland, cosmic]
         arch: [amd64, arm64]
         include:
           - arch: amd64
             runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
+          - variant: cosmic
+            arch: amd64
+            runner: ubuntu-24.04
+            base_image: quay.io/fedora/fedora-bootc@sha256:f2d97f1e70d557d05900d6eba9c37a29ccff9aeaf0785ba661047492cd0136bc
+          - variant: cosmic
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            base_image: quay.io/fedora/fedora-bootc@sha256:3588110b39357b21348ab8c6e8ce7aa50c813b92a930118e06d89ca389cc0287
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
@@ -340,11 +370,21 @@ jobs:
       # quay.io's CDN drops blob downloads now and then; pull the base with
       # retries so `podman build` starts from a local copy.
       - name: Pull the base image
-        run: .github/scripts/pull.sh
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          if [ "$VARIANT" = cosmic ]; then .github/scripts/pull.sh "$BASE_IMAGE"
+          else .github/scripts/pull.sh; fi
 
       - name: Build
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+          VARIANT: ${{ matrix.variant }}
         run: |
-          podman build --build-arg VARIANT=${{ matrix.variant }} \
+          args=(--build-arg "VARIANT=$VARIANT")
+          if [ "$VARIANT" = cosmic ]; then args+=(--build-arg "BASE_IMAGE=$BASE_IMAGE"); fi
+          podman build "${args[@]}" \
             --build-arg AGENTUX_VERSION="$(date -u +%Y.%m.%d).${GITHUB_SHA::7}" \
             --build-arg AGENTUX_COMMIT="$GITHUB_SHA" \
             --tag agentux:ci .
@@ -373,6 +413,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: COSMIC variant contract
+        run: node tests/cosmic-contract.mjs
 
       - name: shellcheck
         run: |

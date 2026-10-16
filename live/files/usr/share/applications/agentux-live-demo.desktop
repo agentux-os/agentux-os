@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AgentUX Live Demo
+GenericName=Explore AgentUX
+Comment=Open Cockpit and explore the offline agent activity demo in this live session
+Exec=agentux-cockpit
+Icon=agentux
+Terminal=false
+Categories=Development;System;
+Keywords=agent;cockpit;demo;live;
+StartupNotify=true

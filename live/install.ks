@@ -5,13 +5,15 @@
 # tag, or for a release ISO the release's digest, so it installs exactly what
 # was tested and released. @TRACK_IMAGE@ is the channel the installed system
 # follows: ghcr.io/agentux-os/<image>:stable (release ISOs) or :latest. Language, keyboard and disk are asked for
-# interactively; the account is created by plasma-setup's first-boot wizard.
+# interactively. Plasma uses plasma-setup for account creation; the COSMIC
+# install enables Fedora Initial Setup through @FIRSTBOOT_DIRECTIVE@.
 #
 # The image comes from the registry, not from the live system, so nothing
 # live-only ends up installed. No --no-signature-verification: the pull goes
 # through the live system's /etc/containers/policy.json, which is the image's
 # own and requires the AgentUX cosign signature for this repository, so an
 # unsigned or tampered image fails the install.
+@FIRSTBOOT_DIRECTIVE@
 ostreecontainer --url=@INSTALL_IMAGE@ --transport=registry
 
 # Track the channel for updates the way bootc-image-builder's installer ISO

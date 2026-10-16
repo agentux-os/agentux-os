@@ -8,8 +8,9 @@
 #
 #   .github/scripts/pull.sh [IMAGE...]
 #
-# Without arguments, pulls the Containerfile's base image (its FROM, with
-# FEDORA_VERSION's default). Run it with sudo to pull into root's storage.
+# Without arguments, pulls the Containerfile's BASE_IMAGE default, expanded
+# with FEDORA_VERSION. Pass explicit image references to pull other bases.
+# Run it with sudo to pull into root's storage.
 # PULL_ATTEMPTS (default 5) bounds the outer attempts; attempt n waits n*20 s.
 set -euo pipefail
 
@@ -18,10 +19,10 @@ images=("$@")
 if (( ${#images[@]} == 0 )); then
     here="$(cd "$(dirname "$0")/../.." && pwd)"
     version="$(sed -n 's/^ARG FEDORA_VERSION=//p' "$here/Containerfile")"
-    from="$(sed -n 's/^FROM //p' "$here/Containerfile" | head -n 1)"
-    base="${from//\$\{FEDORA_VERSION\}/$version}"
-    if [[ -z "$version" || -z "$from" || "$base" == *'$'* ]]; then
-        echo "cannot work out the base image from the Containerfile (FROM $from, FEDORA_VERSION $version)" >&2
+    base="$(sed -n 's/^ARG BASE_IMAGE=//p' "$here/Containerfile")"
+    base="${base//\$\{FEDORA_VERSION\}/$version}"
+    if [[ -z "$version" || -z "$base" || "$base" == *'$'* ]]; then
+        echo "cannot work out the base image from the Containerfile (BASE_IMAGE $base, FEDORA_VERSION $version)" >&2
         exit 1
     fi
     images=("$base")

@@ -34,6 +34,7 @@ src=/tmp/live
 case "${IMAGE_ID:-}" in
     agentux) label=AgentUX-Live title=AgentUX ;;
     agentux-hyprland) label=AgentUX-Hyprland-Live title="AgentUX Hyprland" ;;
+    agentux-cosmic) label=AgentUX-COSMIC-Live title="AgentUX COSMIC" ;;
     *) echo "not an AgentUX image (IMAGE_ID=${IMAGE_ID:-unset})" >&2; exit 1 ;;
 esac
 # What "Install AgentUX" installs: the published, signed image of the same
@@ -76,8 +77,8 @@ dnf -y install \
     livesys-scripts \
     qemu-guest-agent \
     "${efi_pkgs[@]}"
-# The desktop note below is Plasma's sticky note widget.
-if ! rpm -q --quiet kdeplasma-addons; then
+# The live note is Plasma's sticky note widget; COSMIC uses a regular app-menu launcher.
+if [[ "$IMAGE_ID" != agentux-cosmic ]] && ! rpm -q --quiet kdeplasma-addons; then
     dnf -y install kdeplasma-addons
 fi
 dnf clean all
@@ -157,12 +158,22 @@ printf '%s\n' "$install_image" >/usr/share/agentux/live/install-image
 printf '%s\n' "$track_image" >/usr/share/agentux/live/track-image
 : >/usr/share/agentux/live/marker
 
-sed -i 's/^livesys_session=.*/livesys_session=kde/' /etc/sysconfig/livesys
-grep -qx 'livesys_session=kde' /etc/sysconfig/livesys
+if [[ "$IMAGE_ID" == agentux-cosmic ]]; then
+    test -x /usr/libexec/livesys/sessions.d/livesys-cosmic
+    sed -i 's/^livesys_session=.*/livesys_session=cosmic/' /etc/sysconfig/livesys
+    grep -qx 'livesys_session=cosmic' /etc/sysconfig/livesys
+else
+    sed -i 's/^livesys_session=.*/livesys_session=kde/' /etc/sysconfig/livesys
+    grep -qx 'livesys_session=kde' /etc/sysconfig/livesys
+fi
 systemctl enable livesys.service livesys-late.service
-# No first-boot wizard: livesys creates the user. (livesys also marks it
-# done at boot; this keeps plasma-setup from starting before that.)
-touch /etc/plasma-setup-done
+# No first-boot wizard in the live session: livesys creates liveuser. The
+# installed COSMIC image gets Initial Setup from the kickstart directive below.
+if [[ "$IMAGE_ID" == agentux-cosmic ]]; then
+    systemctl disable initial-setup.service
+else
+    touch /etc/plasma-setup-done
+fi
 
 # Login-time downloads: none. The agent CLIs install on demand, into RAM
 # ("Try the agent CLIs in this session" in the application menu starts the
@@ -183,11 +194,13 @@ grep -q -- '--fake-agents' /usr/lib/systemd/user/agentuxd.service.d/50-agentux-l
 # script runs at the live user's first (and only) login. Then a sticky note
 # on the desktop that explains the live session and the demo (its text is
 # put in place by livesys-session-extra).
-layout=/usr/share/plasma/look-and-feel/os.agentux.desktop/contents/layouts/org.kde.plasma.desktop-layout.js
-grep -q '^    "applications:agentux-cockpit.desktop",$' "$layout"
-sed -i 's|^    "applications:agentux-cockpit.desktop",$|    "applications:agentux-live-install.desktop",\n&|' "$layout"
-cat "$src/layout-live.js" >>"$layout"
-grep -q 'agentux-live-install.desktop' "$layout"
+if [[ "$IMAGE_ID" != agentux-cosmic ]]; then
+    layout=/usr/share/plasma/look-and-feel/os.agentux.desktop/contents/layouts/org.kde.plasma.desktop-layout.js
+    grep -q '^    "applications:agentux-cockpit.desktop",$' "$layout"
+    sed -i 's|^    "applications:agentux-cockpit.desktop",$|    "applications:agentux-live-install.desktop",\n&|' "$layout"
+    cat "$src/layout-live.js" >>"$layout"
+    grep -q 'agentux-live-install.desktop' "$layout"
+fi
 
 # ---- installer -------------------------------------------------------------
 
@@ -215,14 +228,17 @@ mkdir -p "$branding"
 cp -v "$src"/cockpit-branding/* "$branding/"
 test -f "$branding/branding.css" && test -f "$branding/logo.png"
 
-# An Anaconda profile for AgentUX: Kinoite's (Btrfs, the ostree defaults),
-# picked by os-release's ID and VARIANT_ID.
+# An Anaconda profile for AgentUX, picked by os-release's ID and VARIANT_ID.
+# Plasma/Hyprland use Kinoite's Btrfs/ostree defaults; COSMIC is based on
+# generic Fedora bootc and must inherit Fedora's installer defaults instead.
+base_profile=fedora-kinoite
+if [[ "$IMAGE_ID" == agentux-cosmic ]]; then base_profile=fedora; fi
 mkdir -p /etc/anaconda/profile.d
 cat >/etc/anaconda/profile.d/agentux.conf <<EOF
 # AgentUX live installer (live ISO only).
 [Profile]
 profile_id = $IMAGE_ID
-base_profile = fedora-kinoite
+base_profile = $base_profile
 
 [Profile Detection]
 os_id = $ID
@@ -232,7 +248,15 @@ EOF
 # What the installer installs (live/install.ks): the signed image from the
 # registry, verified against the image's own signature policy, with the
 # deployment tracking it like any other install.
+firstboot_directive=
+if [[ "$IMAGE_ID" == agentux-cosmic ]]; then
+    # Anaconda's firstboot command is required: without it Initial Setup is
+    # disabled by default and the installed system would have no user-creation
+    # screen. COSMIC supplies the matching Wayland backend in its image.
+    firstboot_directive='firstboot --enable'
+fi
 sed -e "s|@INSTALL_IMAGE@|$install_image|g" -e "s|@TRACK_IMAGE@|$track_image|g" \
+    -e "s|@FIRSTBOOT_DIRECTIVE@|$firstboot_directive|g" \
     "$src/install.ks" >/usr/share/agentux/live/install.ks
 # Every @PLACEHOLDER@ replaced (a digest's @sha256: is not one).
 if grep -qE '@[A-Z_]+@' /usr/share/agentux/live/install.ks; then

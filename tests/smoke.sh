@@ -5,17 +5,18 @@
 # network), bounded by its unit's TimeoutStartSec, and checks that every tool
 # resolves from a clean login shell. Then installs Antigravity's ACP server
 # the way its own unit does (warnings only). Step timings go to the log and,
-# if SMOKE_SUMMARY names a file, to it as Markdown. SMOKE_VARIANT (plasma or
-# hyprland) is the image variant expected; the hyprland one
-# also gets its Hyprland session and defaults checked.
+# if SMOKE_SUMMARY names a file, to it as Markdown. SMOKE_VARIANT selects the
+# expected desktop image; its session-specific packages and defaults are
+# checked independently.
 set -euo pipefail
 
 # Without SMOKE_VARIANT (`just smoke`), the image's own os-release says which.
-variant="${SMOKE_VARIANT:-$(grep -qxE 'VARIANT_ID="?agentux-hyprland"?' /etc/os-release && echo hyprland || echo plasma)}"
+variant="${SMOKE_VARIANT:-$(grep -qxE 'IMAGE_ID="?agentux-cosmic"?' /etc/os-release && echo cosmic || grep -qxE 'VARIANT_ID="?agentux-hyprland"?' /etc/os-release && echo hyprland || echo plasma)}"
 case "$variant" in
     plasma) image_id=agentux ;;
     hyprland) image_id=agentux-hyprland ;;
-    *) echo "SMOKE_VARIANT must be plasma or hyprland" >&2; exit 2 ;;
+    cosmic) image_id=agentux-cosmic ;;
+    *) echo "SMOKE_VARIANT must be plasma, hyprland, or cosmic" >&2; exit 2 ;;
 esac
 
 user=agentux-smoke
@@ -142,10 +143,22 @@ for bin in aux agentuxd agentux-cockpit; do
 done
 check 'aux --version'
 check 'agentuxd --version'
-assert "Plasma look-and-feel os.agentux.desktop" \
-    test -e /usr/share/plasma/look-and-feel/os.agentux.desktop/metadata.json
-assert "kdeglobals selects the AgentUX theme" \
-    grep -qx 'LookAndFeelPackage=os.agentux.desktop' /etc/xdg/kdeglobals
+if [[ "$variant" == cosmic ]]; then
+    assert "COSMIC session is installed" test -f /usr/share/wayland-sessions/cosmic.desktop
+    assert "COSMIC session launches cosmic-session" \
+        grep -qx 'Exec=/usr/bin/start-cosmic' /usr/share/wayland-sessions/cosmic.desktop
+    assert "COSMIC image excludes Plasma's workspace package" \
+        bash -c '! rpm -q --quiet plasma-workspace'
+    assert "COSMIC Anaconda Initial Setup backend is installed" \
+        test -x /usr/libexec/initial-setup/run-gui-backend
+    assert "COSMIC dark accent palette is installed" \
+        test -f /usr/share/cosmic/com.system76.CosmicSettings/v1/accent_palette_dark.ron
+else
+    assert "Plasma look-and-feel os.agentux.desktop" \
+        test -e /usr/share/plasma/look-and-feel/os.agentux.desktop/metadata.json
+    assert "kdeglobals selects the AgentUX theme" \
+        grep -qx 'LookAndFeelPackage=os.agentux.desktop' /etc/xdg/kdeglobals
+fi
 # The system calls itself AgentUX but keeps Fedora's ID and version fields
 # (see the Containerfile). The inner bash expands the variables.
 # shellcheck disable=SC2016
@@ -200,10 +213,12 @@ assert "agentux-version --refresh caches a valid list, ignores a broken one" \
 rm -rf "$releases_dir" /var/cache/agentux/releases.json
 # plasma-setup's first-boot wizard loads its background from Fedora's Default
 # wallpaper package, which the Containerfile points at AgentUX's.
-for f in images/5120x2880.jxl images/1440x2960.jxl images_dark/5120x2880.jxl images_dark/1440x2960.jxl; do
-    assert "wallpapers/Default/contents/$f is AgentUX's" \
-        test "$(readlink -f "/usr/share/wallpapers/Default/contents/$f")" = "/usr/share/wallpapers/AgentUX-Default/contents/$f"
-done
+if [[ "$variant" != cosmic ]]; then
+    for f in images/5120x2880.jxl images/1440x2960.jxl images_dark/5120x2880.jxl images_dark/1440x2960.jxl; do
+        assert "wallpapers/Default/contents/$f is AgentUX's" \
+            test "$(readlink -f "/usr/share/wallpapers/Default/contents/$f")" = "/usr/share/wallpapers/AgentUX-Default/contents/$f"
+    done
+fi
 assert "agentuxd enabled for all users" \
     test -L /etc/systemd/user/default.target.wants/agentuxd.service
 assert "agentux-first-login enabled for all users" \
@@ -321,7 +336,7 @@ if [[ "$variant" == hyprland ]]; then
     rm -rf "$hypr_runtime"
     waybar_agents
 else
-    assert "no Hyprland session in the plasma image" test ! -e "$hypr_session"
+    assert "no Hyprland session in the $variant image" test ! -e "$hypr_session"
 fi
 
 # Start the daemon as the user, the way its user unit does, and talk to it.

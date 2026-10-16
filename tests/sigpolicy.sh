@@ -6,8 +6,8 @@
 # Run on the CI host after the image was pushed and signed. A pull of the
 # signed digest and tag must pass, a pull of an unsigned image in the same
 # repository must be refused for lack of a signature, and an image from
-# another registry must still pass (Fedora's defaults are kept). Both AgentUX
-# repositories (agentux and agentux-hyprland) must require the AgentUX key,
+# another registry must still pass (Fedora's defaults are kept). All three
+# AgentUX repositories must require the AgentUX key,
 # whichever image runs this, so switching between the variants is checked.
 # For a manifest list, ARCH (amd64, arm64) picks the image skopeo resolves
 # it to, as a system of that architecture would (skopeo --override-arch); the
@@ -47,7 +47,7 @@ echo "::endgroup::"
 required='.transports.docker[$r] | length == 1 and .[0].type == "sigstoreSigned"
     and .[0].keyPath == "/etc/pki/containers/agentux-os.pub"
     and .[0].signedIdentity.type == "matchRepository"'
-for r in ghcr.io/agentux-os/agentux ghcr.io/agentux-os/agentux-hyprland; do
+for r in ghcr.io/agentux-os/agentux ghcr.io/agentux-os/agentux-hyprland ghcr.io/agentux-os/agentux-cosmic; do
     if in_image jq -e --arg r "$r" "$required" /etc/containers/policy.json >/dev/null; then
         echo "policy requires the AgentUX key for $r"
     else
