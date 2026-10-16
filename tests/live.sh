@@ -23,6 +23,16 @@ set -uo pipefail
 
 phase="${LIVE_PHASE:?}"
 user=liveuser
+image_id="${LIVE_TEST_VARIANT:-}"
+if [[ -z "$image_id" && -r /usr/lib/os-release ]]; then
+    # The phase checks run in the guest; installed-image verification runs on
+    # the host and receives LIVE_TEST_VARIANT explicitly from live-vm.sh.
+    # shellcheck source=/dev/null
+    . /usr/lib/os-release
+    image_id="${IMAGE_ID:-agentux}"
+fi
+is_cosmic=false
+[[ "$image_id" == agentux-cosmic ]] && is_cosmic=true
 fail=0
 
 ok() { echo "ok   $*"; }
@@ -95,12 +105,23 @@ phase_checks() {
         bad "no wayland session for $user"
     fi
     local proc
-    for proc in kwin_wayland plasmashell agentux-cockpit; do
+    local session_processes=(kwin_wayland plasmashell)
+    if "$is_cosmic"; then
+        session_processes=(cosmic-session cosmic-comp)
+        if [[ "$(loginctl show-session "$session" -P Desktop)" == *cosmic* ]]; then
+            ok "COSMIC is the active desktop session"
+        else
+            bad "active desktop is not COSMIC ($(loginctl show-session "$session" -P Desktop))"
+        fi
+    fi
+    for proc in "${session_processes[@]}" agentux-cockpit; do
         if wait_for 180 pgrep -u "$user" -x "$proc"; then ok "$proc running for $user"; else bad "$proc not running for $user"; fi
     done
-    local laf
-    laf="$(as_user kreadconfig6 --group KDE --key LookAndFeelPackage 2>&1)"
-    if [[ "$laf" == os.agentux.desktop ]]; then ok "look-and-feel is $laf"; else bad "look-and-feel is '$laf', expected os.agentux.desktop"; fi
+    if ! "$is_cosmic"; then
+        local laf
+        laf="$(as_user kreadconfig6 --group KDE --key LookAndFeelPackage 2>&1)"
+        if [[ "$laf" == os.agentux.desktop ]]; then ok "look-and-feel is $laf"; else bad "look-and-feel is '$laf', expected os.agentux.desktop"; fi
+    fi
 
     echo "== agentuxd with fake agents"
     assert "agentuxd.service active" user_systemctl is-active -q agentuxd.service
@@ -155,7 +176,9 @@ phase_checks() {
     # launcher (temporary, into RAM) is in the application menu only.
     local icons
     icons="$(find "$desktop" -maxdepth 1 -name '*.desktop' -printf '%f\n' 2>/dev/null | sort | paste -sd ' ')"
-    if [[ "$icons" == agentux-live-install.desktop ]]; then ok "Install AgentUX is the only desktop icon"; else warn "desktop icons: '$icons', expected only agentux-live-install.desktop"; fi
+    if "$is_cosmic"; then
+        if [[ "$icons" == "agentux-live-demo.desktop agentux-live-install.desktop" ]]; then ok "COSMIC desktop offers live demo and install icons"; else warn "COSMIC desktop icons: '$icons'"; fi
+    elif [[ "$icons" == agentux-live-install.desktop ]]; then ok "Install AgentUX is the only desktop icon"; else warn "desktop icons: '$icons', expected only agentux-live-install.desktop"; fi
     local clis=/usr/share/applications/agentux-live-agent-clis.desktop
     if grep -qx 'Name=Try the agent CLIs in this session' "$clis" && grep -q '^Comment=.*(RAM).*reboot' "$clis"; then
         ok "\"Try the agent CLIs in this session\" in the application menu (says RAM, gone on reboot)"
@@ -163,10 +186,12 @@ phase_checks() {
         warn "the agent CLIs' menu launcher is not \"Try the agent CLIs in this session\" with its RAM note"; indent <"$clis"
     fi
     if [[ ! -e "$desktop/liveinst.desktop" ]]; then ok "Fedora's installer launcher replaced"; else warn "Fedora's liveinst.desktop is still on the desktop"; fi
-    if grep -q 'agentux-live-install.desktop' "/var/home/$user/.config/plasma-org.kde.plasma.desktop-appletsrc" 2>/dev/null; then
-        ok "Install AgentUX pinned in the panel"
-    else
-        warn "Install AgentUX not in the panel's launchers"
+    if ! "$is_cosmic"; then
+        if grep -q 'agentux-live-install.desktop' "/var/home/$user/.config/plasma-org.kde.plasma.desktop-appletsrc" 2>/dev/null; then
+            ok "Install AgentUX pinned in the panel"
+        else
+            warn "Install AgentUX not in the panel's launchers"
+        fi
     fi
     if command -v liveinst >/dev/null && command -v anaconda >/dev/null; then ok "liveinst and anaconda installed"; else warn "liveinst or anaconda missing"; fi
     if grep -q '^%include /usr/share/agentux/live/install.ks' /usr/share/anaconda/interactive-defaults.ks \
@@ -311,6 +336,14 @@ phase_verify() {
         bad "installed system's origin does not track $image"
     fi
     if [[ -e "$deploy/usr/share/agentux/live" ]]; then bad "live-only /usr/share/agentux/live in the installed system"; else ok "no live-only files in /usr"; fi
+    if [[ "$image" == ghcr.io/agentux-os/agentux-cosmic:* || "$image" == ghcr.io/agentux-os/agentux-cosmic@sha256:* ]]; then
+        if [[ -f "$deploy/usr/share/wayland-sessions/cosmic.desktop" && -x "$deploy/usr/libexec/initial-setup/run-gui-backend" ]]; then
+            ok "installed COSMIC session and Initial Setup backend"
+        else
+            bad "installed COSMIC session or Initial Setup backend missing"
+        fi
+        if grep -qx 'firstboot --enable' /usr/share/agentux/live/install.ks; then ok "COSMIC installer enabled Initial Setup"; else bad "COSMIC installer lacks firstboot --enable"; fi
+    fi
     if grep -q '^liveuser:' "$deploy/etc/passwd" 2>/dev/null; then bad "liveuser exists in the installed system"; else ok "no liveuser in the installed system"; fi
     if grep -q '^installtest:' "$deploy/etc/passwd" 2>/dev/null; then ok "the installer's user exists"; else warn "installtest user not found in the deployment's /etc/passwd"; fi
     if [[ -L "$deploy/etc/systemd/user/default.target.wants/agentux-first-login.service" \

@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       variant:
-        description: Image variant to make live (plasma is ghcr.io/agentux-os/agentux, hyprland is ghcr.io/agentux-os/agentux-hyprland)
+        description: Image variant (COSMIC is experimental and nightly-only)
         type: choice
-        options: [plasma, hyprland]
+        options: [plasma, hyprland, cosmic]
         default: plasma
       arch:
         description: Architecture (arm64 builds the ISO but cannot boot-test it without KVM on the runner)
@@ -66,11 +66,11 @@ on:
 env:
   # What the live system is built from: an explicit image (release.yml passes
   # the tag's digest), or the variant's :latest.
-  IMAGE: ${{ inputs.image || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
-  REPO: ${{ inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland' || 'ghcr.io/agentux-os/agentux' }}
+  IMAGE: ${{ inputs.image || (inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic:latest') || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
+  REPO: ${{ inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic' || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland') || 'ghcr.io/agentux-os/agentux' }}
   CHANNEL: ${{ inputs.channel || 'latest' }}
-  # The ISO's file name: agentux-live-<date>-<arch> or agentux-hyprland-live-<date>-<arch>.
-  ISO_PREFIX: ${{ inputs.variant == 'hyprland' && 'agentux-hyprland-live' || 'agentux-live' }}
+  # COSMIC has a distinct nightly artifact name; Plasma/Hyprland stay unchanged.
+  ISO_PREFIX: ${{ inputs.variant == 'cosmic' && 'agentux-cosmic-live' || (inputs.variant == 'hyprland' && 'agentux-hyprland-live') || 'agentux-live' }}
   LIVE_IMAGE: localhost/agentux-live:ci
   # ublue-os/titanoboa, pinned (main of 2026-05-19, "Only use container
   # images as the only source of truth"); its helper container too.
@@ -243,6 +243,7 @@ jobs:
         if: steps.kvm.outputs.ok == 'true'
         env:
           LIVE_TEST_INSTALL: ${{ (github.event_name != 'workflow_dispatch' || inputs.install-test) && '1' || '0' }}
+          LIVE_TEST_VARIANT: ${{ inputs.variant || 'plasma' }}
           LIVE_TRACK_IMAGE: ${{ env.TRACK_IMAGE }}
         run: tests/live-vm.sh "${{ steps.iso.outputs.name }}.iso" output/live-test
 
@@ -326,6 +327,7 @@ jobs:
         env:
           LIVE_TEST_FIRMWARE: bios
           LIVE_TEST_INSTALL: ${{ (github.event_name != 'workflow_dispatch' || inputs.install-test) && '1' || '0' }}
+          LIVE_TEST_VARIANT: ${{ inputs.variant || 'plasma' }}
           LIVE_TRACK_IMAGE: ${{ env.TRACK_IMAGE }}
         run: tests/live-vm.sh "${{ steps.iso.outputs.path }}" output/live-test
 

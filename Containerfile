@@ -1,17 +1,19 @@
-# AgentUX image: Fedora Kinoite (KDE Plasma, Wayland) as a bootc image.
+# AgentUX image: Fedora Atomic Desktop as a bootc image.
 # See ADR 0001 in agentux-os/agentux.
 
 #
-# One Containerfile, two images: VARIANT=plasma (the default) is
+# One Containerfile, three images: VARIANT=plasma (the default) is
 # ghcr.io/agentux-os/agentux; VARIANT=hyprland is
 # ghcr.io/agentux-os/agentux-hyprland, the same system plus a Hyprland
-# session that the login screen preselects (see the Hyprland step below).
+# session that the login screen preselects (see the Hyprland step below);
+# VARIANT=cosmic is a separate COSMIC-only desktop image.
 
 ARG FEDORA_VERSION=44
-FROM quay.io/fedora/fedora-kinoite:${FEDORA_VERSION}
+ARG BASE_IMAGE=quay.io/fedora/fedora-kinoite:${FEDORA_VERSION}
+FROM ${BASE_IMAGE}
 
 ARG VARIANT=plasma
-RUN case "$VARIANT" in plasma|hyprland) ;; *) echo "VARIANT must be plasma or hyprland, not '$VARIANT'" >&2; exit 1 ;; esac
+RUN case "$VARIANT" in plasma|hyprland|cosmic) ;; *) echo "VARIANT must be plasma, hyprland, or cosmic, not '$VARIANT'" >&2; exit 1 ;; esac
 
 # mise is not in the Fedora repos; use its official RPM repository.
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://mise.jdx.dev/rpm/mise.repo -o /etc/yum.repos.d/mise.repo
@@ -35,33 +37,60 @@ RUN dnf -y install \
         uv \
     && dnf clean all
 
+# COSMIC Atomic is not currently a demonstrated bootc base in this pipeline.
+# Reproduce Fedora's generated direct package list on Fedora bootc instead.
+RUN --mount=type=bind,source=variants,target=/tmp/variants \
+    if [ "$VARIANT" != cosmic ]; then exit 0; fi \
+    && if rpm -q --quiet plasma-workspace; then echo "COSMIC variant cannot use a Plasma base image" >&2; exit 1; fi \
+    && manifest=/tmp/variants/cosmic/cosmic-atomic.yaml \
+    && test -s "$manifest" \
+    && packages="$(sed -n 's/^  - //p' "$manifest")" \
+    && test -n "$packages" \
+    && dnf -y install $packages initial-setup-gui initial-setup-gui-wayland-cosmic \
+    && dnf clean all \
+    && test -x /usr/libexec/initial-setup/run-gui-backend
+
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
-# included) and recomputes the Plasma overlay checksum.
+# included) and recomputes the desktop overlay checksums.
 ARG AGENTUX_CORE_VERSION=0.4.2
 ARG AGENTUX_DESKTOP_VERSION=0.5.1
 ARG AGENTUX_PLASMA_SHA256=9a51ac25ce44a4b8d14af7d9f67ff8dc7c8a516d0212d8fc14d8b19d0c00a4d5
+ARG AGENTUX_COMMON_SHA256=""
+ARG AGENTUX_COSMIC_SHA256=""
 
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
-# cockpit, and the Plasma 6 defaults overlay (usr/ and etc/, relative to /),
-# checked against the pinned sha256 before it touches the filesystem. Both
-# releases ship x86_64 and aarch64 RPMs; the build runs natively on each
-# architecture (see build.yml), so the build host's machine picks them. The
-# Plasma overlay has no binaries and is the same for both.
+# cockpit RPM plus desktop overlays (usr/ and etc/, relative to /), checked
+# against pinned SHA-256 values before extraction. The common overlay is
+# paired with either the Plasma or COSMIC desktop overlay.
 RUN arch="$(uname -m)" \
     && case "$arch" in x86_64|aarch64) ;; *) echo "unsupported architecture $arch" >&2; exit 1 ;; esac \
     && core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTUX_CORE_VERSION}" \
     && desktop="https://github.com/agentux-os/agentux-desktop/releases/download/v${AGENTUX_DESKTOP_VERSION}" \
-    && plasma="/tmp/agentux-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
     && dnf -y install \
         "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
         "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
     && dnf clean all \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/${plasma#/tmp/}" -o "$plasma" \
-    && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "$plasma" > "$plasma.sha256" \
-    && sha256sum --check --strict "$plasma.sha256" \
-    && tar -xzf "$plasma" -C / --no-same-owner --no-overwrite-dir \
-    && rm -f "$plasma" "$plasma.sha256"
+    && if [ "$VARIANT" = cosmic ]; then \
+        test -n "$AGENTUX_COMMON_SHA256" && test -n "$AGENTUX_COSMIC_SHA256" \
+        && common="agentux-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        && cosmic="agentux-cosmic-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$common" -o "/tmp/$common" \
+        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$cosmic" -o "/tmp/$cosmic" \
+        && printf '%s  %s\n' "$AGENTUX_COMMON_SHA256" "/tmp/$common" > /tmp/common.sha256 \
+        && printf '%s  %s\n' "$AGENTUX_COSMIC_SHA256" "/tmp/$cosmic" > /tmp/cosmic.sha256 \
+        && sha256sum --check --strict /tmp/common.sha256 /tmp/cosmic.sha256 \
+        && tar -xzf "/tmp/$common" -C / --no-same-owner --no-overwrite-dir \
+        && tar -xzf "/tmp/$cosmic" -C / --no-same-owner --no-overwrite-dir \
+        && rm -f "/tmp/$common" "/tmp/$cosmic" /tmp/common.sha256 /tmp/cosmic.sha256; \
+    else \
+        plasma="/tmp/agentux-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/${plasma#/tmp/}" -o "$plasma" \
+        && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "$plasma" > "$plasma.sha256" \
+        && sha256sum --check --strict "$plasma.sha256" \
+        && tar -xzf "$plasma" -C / --no-same-owner --no-overwrite-dir \
+        && rm -f "$plasma" "$plasma.sha256"; \
+    fi
 
 COPY files/ /
 
@@ -175,6 +204,7 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y.%m.%d)}" \
     && set_field PRETTY_NAME "AgentUX $date" \
     && case "$VARIANT" in \
         hyprland) image=agentux-hyprland variant=Hyprland ;; \
+        cosmic) image=agentux-cosmic variant=COSMIC ;; \
         *) image=agentux variant=Plasma ;; \
     esac \
     && set_field VARIANT "$variant" \
@@ -227,7 +257,8 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y.%m.%d)}" \
 # without its AgentUX drop-in, new wallpaper settings) gets AgentUX too.
 # `rpm -V desktop-backgrounds-kde` reports the changed symlink; that is this.
 RUN --mount=type=bind,source=wallpaper,target=/tmp/wallpaper \
-    command -v magick > /dev/null \
+    if [ "$VARIANT" = cosmic ]; then exit 0; fi \
+    && command -v magick > /dev/null \
     && wallpapers=/usr/share/wallpapers \
     && pkg="$wallpapers/AgentUX-Default" \
     && mkdir -p "$pkg/contents/images" "$pkg/contents/images_dark" \
@@ -300,16 +331,16 @@ RUN chmod 0755 /usr/libexec/agentux/grub-theme \
 
 # Updates of this image (bootc upgrade/switch pull through containers/image)
 # must carry a cosign signature from the AgentUX key shipped in files/. Only
-# AgentUX's repositories get the requirement, both variants' in both images,
-# so a `bootc switch` from one variant to the other is checked too: Fedora's
+# AgentUX's three repositories get the requirement in every image, so a
+# `bootc switch` between variants is checked too. Fedora's
 # policy for everything else, including its insecureAcceptAnything default,
 # is kept as is. The policy can't check keyless (Fulcio) signatures from
 # GitHub Actions, since it only matches e-mail identities; CI signs both ways
 # (see build.yml).
 RUN jq --arg key /etc/pki/containers/agentux-os.pub \
-        '[{"type": "sigstoreSigned", "keyPath": $key, "signedIdentity": {"type": "matchRepository"}}] as $signed | .transports.docker["ghcr.io/agentux-os/agentux"] = $signed | .transports.docker["ghcr.io/agentux-os/agentux-hyprland"] = $signed' \
+        '[{"type": "sigstoreSigned", "keyPath": $key, "signedIdentity": {"type": "matchRepository"}}] as $signed | .transports.docker["ghcr.io/agentux-os/agentux"] = $signed | .transports.docker["ghcr.io/agentux-os/agentux-hyprland"] = $signed | .transports.docker["ghcr.io/agentux-os/agentux-cosmic"] = $signed' \
         /etc/containers/policy.json > /tmp/policy.json \
-    && jq -e '.default and .transports.docker["ghcr.io/agentux-os/agentux"] and .transports.docker["ghcr.io/agentux-os/agentux-hyprland"]' /tmp/policy.json > /dev/null \
+    && jq -e '.default and .transports.docker["ghcr.io/agentux-os/agentux"] and .transports.docker["ghcr.io/agentux-os/agentux-hyprland"] and .transports.docker["ghcr.io/agentux-os/agentux-cosmic"]' /tmp/policy.json > /dev/null \
     && cat /tmp/policy.json > /etc/containers/policy.json \
     && rm /tmp/policy.json
 

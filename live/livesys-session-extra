@@ -1,17 +1,20 @@
 # AgentUX live session (live/build.sh installs this as
 # /var/lib/livesys/livesys-session-extra). livesys-main sources it as root at
-# the first boot of the live system, after its own Plasma setup (autologin,
+# the first boot of the live system, after its session setup (autologin and
 # the Fedora installer launcher on the desktop) and before it hands
 # /home/liveuser to the live user.
 
-# "Install AgentUX" replaces Fedora's "Install to Hard Drive" and is the only
-# icon on the desktop. "Try the agent CLIs in this session" (temporary, into
-# RAM) is in the application menu only, so the desktop never offers two
-# different "Install" icons.
+# "Install AgentUX" replaces Fedora's "Install to Hard Drive". COSMIC also
+# gets a separate live-demo launcher; Plasma keeps its desktop note and layout.
+. /usr/lib/os-release
 rm -f /home/liveuser/Desktop/liveinst.desktop \
     /home/liveuser/.local/share/applications/liveinst.desktop
 mkdir -p /home/liveuser/Desktop
 install -m 0755 /usr/share/applications/agentux-live-install.desktop /home/liveuser/Desktop/
+if [ "${IMAGE_ID:-}" = agentux-cosmic ]; then
+    install -m 0755 /usr/share/applications/agentux-live-demo.desktop /home/liveuser/Desktop/
+    exit 0
+fi
 if [ -f /home/liveuser/.config/kickoffrc ]; then
     sed -i 's|/usr/share/applications/liveinst.desktop|/usr/share/applications/agentux-live-install.desktop|' \
         /home/liveuser/.config/kickoffrc

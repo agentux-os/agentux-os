@@ -73,6 +73,9 @@ if [[ "$firmware_mode" == uefi ]]; then
                    -drive "if=pflash,format=raw,file=$dir/OVMF_VARS.fd")
 fi
 qemu-img create -q -f qcow2 "$dir/disk.qcow2" 64G
+# Snapshot the blank install target. Compare its guest-visible contents before
+# invoking the installer to catch accidental automount/setup writes in live.
+cp --reflink=auto "$dir/disk.qcow2" "$dir/disk-before-live.qcow2"
 
 # start_vm [cd|usb]: the VM, with the ISO as its CD or as a USB stick (the
 # ISO's bytes as a disk, as dd writes them; writes go to a throwaway
@@ -123,7 +126,7 @@ stop_vm() {
 # shellcheck disable=SC2317 # called by the EXIT trap
 cleanup() {
     stop_vm
-    rm -f "$dir/disk.qcow2" "$dir/OVMF_VARS.fd" "$dir/qmp.sock" "$dir/qga.sock"
+    rm -f "$dir/disk.qcow2" "$dir/disk-before-live.qcow2" "$dir/OVMF_VARS.fd" "$dir/qmp.sock" "$dir/qga.sock"
 }
 trap cleanup EXIT
 
@@ -264,7 +267,7 @@ else
     summary_line "Autologin into the live session" "FAIL (see live-session.log)"
 fi
 echo "::endgroup::"
-# Let Plasma, the cockpit and the demo settle.
+# Let the desktop session, cockpit and demo settle.
 sleep 45
 screenshot 01-live-desktop
 
@@ -277,6 +280,14 @@ echo "::endgroup::"
 summary_phase "Live session checks" "$system_rc" "$dir/live-checks.log"
 screenshot 02-live-desktop-later
 
+if qemu-img compare -f qcow2 "$dir/disk-before-live.qcow2" "$dir/disk.qcow2"; then
+    summary_line "Persistent disk unchanged before install" "ok"
+else
+    echo "FAIL live session changed the persistent install disk before install"
+    summary_line "Persistent disk unchanged before install" "FAIL"
+    system_rc=1
+fi
+
 # The desktop behind the cockpit: the launchers and the note (Plasma's Show
 # Desktop, toggled on and off again).
 show_desktop() {
@@ -284,10 +295,12 @@ show_desktop() {
     guest_cmd 30 'uid=$(id -u liveuser); runuser -u liveuser -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s "Show Desktop"' \
         >/dev/null || echo "::warning::could not toggle Show Desktop"
 }
-show_desktop
-sleep 3
-screenshot 02-live-desktop-shown
-show_desktop
+if [[ "${LIVE_TEST_VARIANT:-plasma}" != cosmic ]]; then
+    show_desktop
+    sleep 3
+    screenshot 02-live-desktop-shown
+    show_desktop
+fi
 
 # The demo's waiting run, approved: the cockpit shows it move through the
 # pipeline.
@@ -370,8 +383,10 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     if [[ -z "$track_image" ]]; then
         track_image=ghcr.io/agentux-os/agentux:latest
         [[ "$(basename "$iso")" == *hyprland* ]] && track_image=ghcr.io/agentux-os/agentux-hyprland:latest
+        [[ "$(basename "$iso")" == *cosmic* ]] && track_image=ghcr.io/agentux-os/agentux-cosmic:latest
     fi
-    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TRACK_IMAGE="$track_image" LIVE_FIRMWARE="$firmware_mode" \
+    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TEST_VARIANT="${LIVE_TEST_VARIANT:-plasma}" \
+        LIVE_TRACK_IMAGE="$track_image" LIVE_FIRMWARE="$firmware_mode" \
         bash "$here/live.sh" | tee "$dir/install-verify.log"
     verify_rc=${PIPESTATUS[0]}
     sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
@@ -390,7 +405,7 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
         summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
         (( verify_rc == 0 )) || system_rc=1
 
-        # The installed disk alone: its first boot (plasma-setup's wizard).
+        # The installed disk alone: Plasma's setup wizard or COSMIC's Initial Setup.
         start_vm
         capture_frames installed-boot 90
         sleep 240
