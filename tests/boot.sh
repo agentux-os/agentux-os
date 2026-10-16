@@ -150,7 +150,10 @@ check_grub_theme() {
         bad "agentux-grub-theme.service: '$result', $(systemctl is-enabled agentux-grub-theme.service 2>&1)"
         journalctl -b -u agentux-grub-theme.service --no-pager 2>&1 | tail -n 20 | indent
     fi
-    if [[ "$(systemctl --user is-enabled grub-boot-success.timer 2>&1)" != enabled ]] \
+    if [[ "${IMAGE_ID:-}" == agentux-cosmic ]] \
+        && ! systemctl --user cat grub-boot-success.timer >/dev/null 2>&1; then
+        ok "COSMIC base does not ship optional grub-boot-success.timer"
+    elif [[ "$(systemctl --user is-enabled grub-boot-success.timer 2>&1)" != enabled ]] \
         && [[ "$(systemctl --user is-enabled grub-boot-success.service 2>&1)" == masked ]]; then
         ok "grub-boot-success.timer disabled, its service masked (read-only /boot)"
     else
