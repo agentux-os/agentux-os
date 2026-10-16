@@ -55,9 +55,9 @@ RUN --mount=type=bind,source=variants,target=/tmp/variants \
 # included) and recomputes the desktop overlay checksums.
 ARG AGENTUX_CORE_VERSION=0.4.2
 ARG AGENTUX_DESKTOP_VERSION=0.5.1
-ARG AGENTUX_PLASMA_SHA256=9a51ac25ce44a4b8d14af7d9f67ff8dc7c8a516d0212d8fc14d8b19d0c00a4d5
-ARG AGENTUX_COMMON_SHA256=""
-ARG AGENTUX_COSMIC_SHA256=""
+ARG AGENTUX_PLASMA_SHA256=e9588eb1460b657604d3ebf8c558fbb23e2349452762aa76c99e66fb711e61f3
+ARG AGENTUX_COMMON_SHA256=adc52c43ed2001c65dbac732b587428162ef01bf1986904a3a2f9e93e252b88b
+ARG AGENTUX_COSMIC_SHA256=a291f5c8886d5a6d351a56d3a3365aca083b2244cc5ae1241c7866d7b7348ddd
 
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
 # cockpit RPM plus desktop overlays (usr/ and etc/, relative to /), checked
