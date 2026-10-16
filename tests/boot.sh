@@ -23,6 +23,8 @@
 # optional GITHUB_TOKEN is used only to retry a failed first login (mise
 # resolves versions through the GitHub API, which CI runners share).
 set -uo pipefail
+# shellcheck source=/dev/null
+. /etc/os-release
 
 phase="${1:?usage: boot.sh system|installed|desktop|sample}"
 fail=0
