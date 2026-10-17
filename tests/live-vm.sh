@@ -385,6 +385,14 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     sudo qemu-nbd --connect=/dev/nbd0 "$dir/disk.qcow2"
     sleep 3
     sudo partprobe /dev/nbd0 2>/dev/null
+    # udev probes the partitions' file systems after partprobe returns; until
+    # it has, lsblk shows none and the check finds no deployment (v0.5.8's
+    # Hyprland install finished, yet its disk was read too early).
+    sudo udevadm settle --timeout=30 2>/dev/null
+    for _ in $(seq 1 15); do
+        lsblk -lno FSTYPE /dev/nbd0 | grep -q . && break
+        sleep 2
+    done
     lsblk -f /dev/nbd0
     # The channel the installed system must follow: LIVE_TRACK_IMAGE (what
     # live.yml built the ISO with), or the ISO's variant's :latest.
