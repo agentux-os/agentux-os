@@ -211,9 +211,8 @@ pre=()
 # Pre-releases while AgentUX is pre-1.0.
 [[ $tag == v0.* ]] && pre=(--prerelease)
 notes=$(mktemp)
-cat >"$notes" <<EOF
-AgentUX $tag.
-
+"$here/release-notes.sh" "$tag" >"$notes"
+cat >>"$notes" <<EOF
 ## Downloads
 
 ISOs are hosted on download.agentuxos.org (GitHub limits release files to 2 GiB). Each has a \`.sha256\` checksum, attached here and next to the ISO, signed with the AgentUX key.

@@ -175,10 +175,13 @@ jobs:
       # release tooling, not part of the released system, so a fix to them
       # on main lets a failed publish be re-run without a new tag. (The
       # tag's image, ISOs and public key are what get published.)
-      - name: Use main's publishing scripts
+      # Also the release highlights (docs/releases/<tag>.md), which may be
+      # merged after the tag, until the approval.
+      - name: Use main's publishing scripts and release highlights
         run: |
           git fetch --quiet --depth=1 origin main
           git restore --source=FETCH_HEAD -- .github/scripts
+          git restore --source=FETCH_HEAD -- docs/releases 2>/dev/null || true
           git log -1 --format='publishing scripts from main at %h %s' FETCH_HEAD
 
       - name: Free disk space
