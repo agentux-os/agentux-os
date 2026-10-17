@@ -1,6 +1,6 @@
 # Stable Desktop Media and Unified Offline Installer
 
-**Status:** design for review
+**Status:** approved for planning
 **Date:** 2026-10-17
 
 ## Goal
