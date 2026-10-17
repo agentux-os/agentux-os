@@ -14,7 +14,8 @@
 #    checks): the selected desktop (Plasma, Hyprland or COSMIC) and the cockpit,
 #    agentuxd with fake agents answering
 #    `aux ps` with the demo runs, no first-login downloads; the installer
-#    launcher only warns. Screenshots of the desktop, of the demo after
+#    launcher warns for Plasma/COSMIC and is required for Hyprland. Screenshots
+#    of the desktop, of the demo after
 #    approving its waiting run, and of the installer opened from
 #    "Install AgentUX" (best effort).
 # 3. With LIVE_TEST_INSTALL=1 (the default): install to the VM's disk with
