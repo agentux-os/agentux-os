@@ -8,7 +8,9 @@ const buildWorkflow = await readFile('.github/workflows/build.yml', 'utf8');
 assert.match(containerfile, /^ARG AGENTUX_DESKTOP_VERSION=0\.5\.2$/m, 'image pins the desktop bundle release');
 
 for (const bundle of ['common', 'plasma', 'cosmic']) {
-  assert.match(containerfile, new RegExp(`^ARG AGENTUX_${bundle.toUpperCase()}_SHA256=[a-f0-9]{64}$`, 'm'), `${bundle} SHA-256 is pinned`);
+  const pin = containerfile.match(new RegExp(`^ARG AGENTUX_${bundle.toUpperCase()}_SHA256=([a-f0-9]{64})$`, 'm'));
+  assert.ok(pin, `${bundle} SHA-256 is pinned`);
+  assert.notEqual(pin[1], '0'.repeat(64), `${bundle} SHA-256 cannot be a placeholder`);
   assert.ok(install.includes('agentux-desktop-' + bundle + '-${AGENTUX_DESKTOP_VERSION}.tar.gz'), `${bundle} uses the versioned archive name`);
 }
 

@@ -55,10 +55,10 @@ RUN if [ "$VARIANT" = cosmic ]; then \
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the desktop overlay checksums.
 ARG AGENTUX_CORE_VERSION=0.4.2
-ARG AGENTUX_DESKTOP_VERSION=0.5.1
-ARG AGENTUX_PLASMA_SHA256=e9588eb1460b657604d3ebf8c558fbb23e2349452762aa76c99e66fb711e61f3
-ARG AGENTUX_COMMON_SHA256=adc52c43ed2001c65dbac732b587428162ef01bf1986904a3a2f9e93e252b88b
-ARG AGENTUX_COSMIC_SHA256=a291f5c8886d5a6d351a56d3a3365aca083b2244cc5ae1241c7866d7b7348ddd
+ARG AGENTUX_DESKTOP_VERSION=0.5.2
+ARG AGENTUX_PLASMA_SHA256=4b71a9d75f45cf6e6e9194345d76ffb9dd3ef8e963169cca2a8cd0d64b3867c8
+ARG AGENTUX_COMMON_SHA256=81f5bc2c253b7acf3590f1d7b100a9e7617008231f08c16b2fe87439ae02efde
+ARG AGENTUX_COSMIC_SHA256=6b5158e7f99b981504e8b71a1a486c4cbc8eee2a4ab48228384828f5eab15c97
 
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
 # cockpit RPM plus desktop overlays (usr/ and etc/, relative to /), checked
@@ -73,7 +73,7 @@ RUN arch="$(uname -m)" \
         "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
     && dnf clean all \
     && test -n "$AGENTUX_COMMON_SHA256" \
-    && common="agentux-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+    && common="agentux-desktop-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
     && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$common" -o "/tmp/$common" \
     && printf '%s  %s\n' "$AGENTUX_COMMON_SHA256" "/tmp/$common" > /tmp/common.sha256 \
     && sha256sum --check --strict /tmp/common.sha256 \
@@ -81,19 +81,19 @@ RUN arch="$(uname -m)" \
     && rm -f "/tmp/$common" /tmp/common.sha256 \
     && if [ "$VARIANT" = cosmic ]; then \
         test -n "$AGENTUX_COSMIC_SHA256" \
-        && cosmic="agentux-cosmic-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        && cosmic="agentux-desktop-cosmic-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
         && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$cosmic" -o "/tmp/$cosmic" \
         && printf '%s  %s\n' "$AGENTUX_COSMIC_SHA256" "/tmp/$cosmic" > /tmp/cosmic.sha256 \
         && sha256sum --check --strict /tmp/cosmic.sha256 \
         && tar -xzf "/tmp/$cosmic" -C / --no-same-owner --no-overwrite-dir \
         && rm -f "/tmp/$cosmic" /tmp/cosmic.sha256; \
     else \
-        plasma="/tmp/agentux-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
-        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/${plasma#/tmp/}" -o "$plasma" \
-        && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "$plasma" > "$plasma.sha256" \
-        && sha256sum --check --strict "$plasma.sha256" \
-        && tar -xzf "$plasma" -C / --no-same-owner --no-overwrite-dir \
-        && rm -f "$plasma" "$plasma.sha256"; \
+        plasma="agentux-desktop-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$plasma" -o "/tmp/$plasma" \
+        && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "/tmp/$plasma" > "/tmp/$plasma.sha256" \
+        && sha256sum --check --strict "/tmp/$plasma.sha256" \
+        && tar -xzf "/tmp/$plasma" -C / --no-same-owner --no-overwrite-dir \
+        && rm -f "/tmp/$plasma" "/tmp/$plasma.sha256"; \
     fi
 
 COPY files/ /
