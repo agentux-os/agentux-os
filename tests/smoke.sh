@@ -313,7 +313,10 @@ if [[ "$variant" == hyprland ]]; then
     for bin in Hyprland start-hyprland hyprctl hyprlock hypridle waybar fuzzel mako foot swaybg wl-copy cliphist grim slurp nm-applet; do
         assert "$bin" command -v "$bin"
     done
-    assert "hyprpolkitagent user unit" test -f /usr/lib/systemd/user/hyprpolkitagent.service
+    assert "LXQt polkit authentication agent" test -x /usr/libexec/lxqt-policykit-agent
+    assert "Hyprland starts the polkit authentication agent" \
+        grep -qx 'exec-once = /usr/libexec/lxqt-policykit-agent' \
+        /usr/share/agentux/hyprland/user/hypr/hyprland.conf
     assert "xdg-desktop-portal-hyprland" test -f /usr/share/xdg-desktop-portal/hyprland-portals.conf
     assert "session $hypr_session runs hyprland-session" \
         grep -qx 'Exec=/usr/libexec/agentux/hyprland-session' "$hypr_session"

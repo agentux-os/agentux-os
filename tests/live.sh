@@ -3,8 +3,8 @@
 # QEMU guest agent by tests/live-vm.sh (which sets LIVE_PHASE):
 #
 #   session   wait for the live user's graphical session (autologin)
-#   checks    the live session: live boot, Plasma and the cockpit running for
-#             the live user, agentuxd answering `aux ps` with fake agents and
+#   checks    the live session: live boot, the selected desktop and cockpit
+#             running for the live user, agentuxd answering `aux ps` with fake agents and
 #             the demo runs in it, no first-login downloads; the installer
 #             launcher is checked too, but only warns
 #   approve   approve the demo's waiting run, so the next screenshot shows it
@@ -34,6 +34,14 @@ fi
 is_cosmic=false
 [[ "$image_id" == agentux-cosmic ]] && is_cosmic=true
 fail=0
+
+desktop_session_processes() {
+    case "$1" in
+        agentux-cosmic) printf '%s\n' cosmic-session cosmic-comp ;;
+        agentux-hyprland) printf '%s\n' Hyprland lxqt-policykit-agent ;;
+        *) printf '%s\n' kwin_wayland plasmashell ;;
+    esac
+}
 
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
@@ -105,13 +113,20 @@ phase_checks() {
         bad "no wayland session for $user"
     fi
     local proc
-    local session_processes=(kwin_wayland plasmashell)
+    local session_processes=()
+    mapfile -t session_processes < <(desktop_session_processes "$image_id")
     if "$is_cosmic"; then
         session_processes=(cosmic-session cosmic-comp)
         if [[ "$(loginctl show-session "$session" -P Desktop)" == *cosmic* ]]; then
             ok "COSMIC is the active desktop session"
         else
             bad "active desktop is not COSMIC ($(loginctl show-session "$session" -P Desktop))"
+        fi
+    elif [[ "$image_id" == agentux-hyprland ]]; then
+        if [[ "$(loginctl show-session "$session" -P Desktop)" == *Hyprland* ]]; then
+            ok "Hyprland is the active desktop session"
+        else
+            bad "active desktop is not Hyprland ($(loginctl show-session "$session" -P Desktop))"
         fi
     fi
     for proc in "${session_processes[@]}" agentux-cockpit; do
@@ -402,6 +417,7 @@ phase_verify() {
 }
 
 case "$phase" in
+    desktop-processes) desktop_session_processes "$image_id"; exit $? ;;
     session) phase_session; exit $? ;;
     checks) phase_checks ;;
     approve) phase_approve ;;

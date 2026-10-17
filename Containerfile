@@ -127,7 +127,7 @@ RUN --mount=type=bind,source=variants,target=/tmp/variants \
         hyprland-guiutils \
         hyprland-qt-support \
         hyprlock \
-        hyprpolkitagent \
+        lxqt-policykit \
         mako \
         network-manager-applet \
         playerctl \
