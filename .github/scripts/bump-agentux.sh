@@ -3,7 +3,7 @@ set -euo pipefail
 
 containerfile=${AGENTUX_CONTAINERFILE:-Containerfile}
 [[ -f "$containerfile" ]] || { echo "Containerfile not found: $containerfile" >&2; exit 2; }
-command -v gh >/dev/null || { echo 'gh is required (authenticate with `gh auth login`)' >&2; exit 2; }
+command -v gh >/dev/null || { echo "gh is required (authenticate with gh auth login)" >&2; exit 2; }
 
 latest() {
     local tag

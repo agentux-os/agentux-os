@@ -9,8 +9,8 @@ cat > "$tmp/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1 $2 $3" == 'release list --repo' ]]; then
-    [[ "$4" == agentux-os/agentux-core ]] && { echo v0.4.3; exit; }
-    [[ "$4" == agentux-os/agentux-desktop ]] && { echo v0.5.2; exit; }
+    [[ "$4" == agentux-os/agentux-core ]] && { echo 0.4.3; exit; }
+    [[ "$4" == agentux-os/agentux-desktop ]] && { echo 0.5.2; exit; }
 fi
 if [[ "$1 $2" == 'release view' ]]; then
     while IFS= read -r asset; do
