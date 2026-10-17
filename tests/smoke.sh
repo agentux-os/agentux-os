@@ -316,7 +316,7 @@ if [[ "$variant" == hyprland ]]; then
     assert "LXQt polkit authentication agent" test -x /usr/libexec/lxqt-policykit-agent
     assert "Hyprland starts the polkit authentication agent" \
         grep -qx 'exec-once = /usr/libexec/lxqt-policykit-agent' \
-        /usr/share/agentux/hyprland/user/hypr/hyprland.conf
+        /usr/share/agentux/hyprland/hyprland.conf
     assert "xdg-desktop-portal-hyprland" test -f /usr/share/xdg-desktop-portal/hyprland-portals.conf
     assert "session $hypr_session runs hyprland-session" \
         grep -qx 'Exec=/usr/libexec/agentux/hyprland-session' "$hypr_session"
