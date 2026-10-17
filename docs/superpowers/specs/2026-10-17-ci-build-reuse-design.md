@@ -28,6 +28,7 @@ Reduce image-build time and runner work in AgentUX OS CI by testing the exact lo
 - In each leg, preserve the current base resolution/pull and single `podman build`.
 - Move the current `First login and tool checks`, `Installation profile contract`, and their smoke-summary generation from the `smoke` job into the image job, before `Push`.
 - Capture the local image ID after build and verify it is unchanged after tests. The tests run the same local `agentux:ci` reference; they must not build or retag another image.
+- The image job's token has `packages: write` for staging pushes. Pass it into the smoke container only for `refs/heads/main` (push, schedule, or dispatch); pull requests and non-main dispatches run smoke checks without that token so untrusted image code cannot access publication credentials.
 - On pull requests, run all tests but do not push or upload image artifacts. On main/nightly and test dispatches, push the already-tested image to the current staging tag and upload the same per-architecture digest artifact as today.
 - Remove the duplicate `smoke` job and make `publish` depend on successful `image` jobs only. Keep signing, manifest-list assembly, signature-policy verification, public-tag promotion, and the named `build` aggregate check intact.
 - Leave `boot.yml` unchanged in this first change. Its PR path filter and rootful bootc-image-builder/QEMU path are materially different from container smoke; its multi-GB artifact-versus-rebuild tradeoff needs a separate measured design. Scheduled and release boot tests continue to consume published/candidate images.
@@ -36,7 +37,8 @@ Reduce image-build time and runner work in AgentUX OS CI by testing the exact lo
 ## Failure behavior and security
 
 - Any smoke or profile-contract failure fails the image matrix leg before a staging push; therefore `publish` cannot update public tags.
-- Pull-request runs remain read-only with respect to GHCR packages; no new token, registry write, or image artifact is introduced for PRs.
+- Pull-request runs do not push images or upload digest artifacts; the package-write token is not forwarded to smoke-container code on PRs or non-main refs.
+- The package-write token is not passed into the image container on pull requests or non-main refs.
 - The per-architecture image and existing COSMIC digest resolution remain unchanged.
 - No image is rebuilt between test and push, and the test output records the local image ID used.
 
