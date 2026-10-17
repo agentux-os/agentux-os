@@ -437,15 +437,17 @@ The build fails if the defaults stop parsing (`Hyprland --verify-config`, `foot 
 
 ## AgentUX versions
 
-The AgentUX components are installed from their GitHub releases, pinned in one place, the `ARG`s at the top of the AgentUX section of the [`Containerfile`](Containerfile). The image currently ships agentux-core 0.4.2 and agentux-desktop 0.4.5.
+The AgentUX components are installed from their GitHub releases, pinned in one place, the `ARG`s at the top of the AgentUX section of the [`Containerfile`](Containerfile). The architecture-specific `agentux-cockpit` RPM remains independent of desktop configuration. Three architecture-independent bundles provide common integration and the selected desktop's settings.
 
 | Pin | What it selects |
 |---|---|
 | `AGENTUX_CORE_VERSION` | `agentux-<version>-1.fc44.<arch>.rpm` from agentux-core's `v<version>` release |
-| `AGENTUX_DESKTOP_VERSION` | `agentux-cockpit-<version>-1.<arch>.rpm` and `agentux-plasma-<version>.tar.gz` (the same for both architectures) from agentux-desktop's `v<version>` release |
-| `AGENTUX_PLASMA_SHA256` | sha256 of that Plasma tarball; the build fails if the download doesn't match |
+| `AGENTUX_DESKTOP_VERSION` | `agentux-cockpit-<version>-1.<arch>.rpm` plus the three bundle archives from agentux-desktop's `v<version>` release |
+| `AGENTUX_COMMON_SHA256` | SHA-256 pin for `agentux-desktop-common-<version>.tar.gz` |
+| `AGENTUX_PLASMA_SHA256` | SHA-256 pin for `agentux-desktop-plasma-<version>.tar.gz` |
+| `AGENTUX_COSMIC_SHA256` | SHA-256 pin for `agentux-desktop-cosmic-<version>.tar.gz` |
 
-`<arch>` is the build's `uname -m`, `x86_64` or `aarch64`; any other architecture fails the build. Both RPMs go through `dnf install`; the Plasma tarball (paths relative to `/`, only `usr/` and `etc/`) is extracted over `/` after the checksum check. To move to newer releases, run `just bump-agentux` (needs an authenticated `gh`): it takes the newest non-draft release of each repo, pre-releases included, checks that both releases have the `x86_64` and `aarch64` RPMs, rewrites the three pins from them (the checksum comes from the release's `.sha256` asset) and shows the diff to commit. A build with other versions without editing the file: `podman build --build-arg AGENTUX_CORE_VERSION=… .`. If a release ever changes the RPM's release number or Fedora tag (`-1.fc44`), update the file name in the `Containerfile` by hand.
+`<arch>` is the build's `uname -m`, `x86_64` or `aarch64`; any other architecture fails the build. Each variant installs the common archive first, verifies it against its pinned SHA-256, and extracts exactly one desktop bundle: Plasma for the Plasma and Hyprland images, COSMIC for the COSMIC image. The archives contain only `usr/` and `etc/`; configuration is baked into the immutable image rather than layered as runtime RPMs. `just bump-agentux` (needs an authenticated `gh`) checks both architecture RPMs and all three archives plus their checksum sidecars before updating any pin, and leaves `Containerfile` unchanged if a required release asset is missing or malformed. If a release ever changes the RPM's release number or Fedora tag (`-1.fc44`), update the file name in the `Containerfile` by hand.
 
 ## Boot splash
 

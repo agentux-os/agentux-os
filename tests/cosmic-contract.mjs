@@ -26,8 +26,8 @@ assert.match(containerfile, /rpm -q cosmic-session/, 'COSMIC build validates the
 assert.match(containerfile, /dnf -y install initial-setup-gui initial-setup-gui-wayland-cosmic/, 'COSMIC adds only the live install Initial Setup bridge');
 assert.doesNotMatch(containerfile, /cosmic-packages|cosmic-atomic\.yaml|dnf -y install[^\n]*cosmic-session/, 'COSMIC desktop packages are not duplicated on top of the upstream Atomic base');
 assert.match(containerfile, /io\.github\.agentux-os\.base-image="\$\{BASE_IMAGE\}"/, 'built image records the exact base image reference');
-assert.match(containerfile, /common="agentux-common-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs the shared AgentUX overlay');
-assert.match(containerfile, /cosmic="agentux-cosmic-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs its own desktop overlay');
+assert.match(containerfile, /common="agentux-desktop-common-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs the shared AgentUX bundle');
+assert.match(containerfile, /cosmic="agentux-desktop-cosmic-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs its own desktop bundle');
 const overlayInstall = containerfile.slice(containerfile.indexOf('# AgentUX itself'));
 const sharedOverlayExtraction = overlayInstall.indexOf('tar -xzf "/tmp/$common"');
 const cosmicOverlayBranch = overlayInstall.indexOf('&& if [ "$VARIANT" = cosmic ]; then');

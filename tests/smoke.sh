@@ -143,12 +143,17 @@ for bin in aux agentuxd agentux-cockpit; do
 done
 check 'aux --version'
 check 'agentuxd --version'
+assert "shared setup backend is installed" test -x /usr/libexec/agentux-setup
+assert "shared setup catalog is installed" test -f /usr/share/agentux/setup/catalog.json
+assert "shared Flathub repository file is installed" test -f /usr/share/agentux/setup/flathub.flatpakrepo
 if [[ "$variant" == cosmic ]]; then
     assert "COSMIC session is installed" test -f /usr/share/wayland-sessions/cosmic.desktop
     assert "COSMIC session launches cosmic-session" \
         grep -qx 'Exec=/usr/bin/start-cosmic' /usr/share/wayland-sessions/cosmic.desktop
     assert "COSMIC image excludes Plasma's workspace package" \
         bash -c '! rpm -q --quiet plasma-workspace'
+    assert "COSMIC image excludes Plasma-owned settings" \
+        bash -c '! test -e /etc/xdg/kdeglobals && ! test -d /usr/share/plasma'
     assert "COSMIC Anaconda Initial Setup backend is installed" \
         test -x /usr/libexec/initial-setup/run-gui-backend
     assert "COSMIC dark accent palette is installed" \
