@@ -47,6 +47,7 @@ This repository publishes the signed container images, installer ISOs and live I
 | Live ISO — Hyprland | [`agentux-hyprland-live-x86_64.iso`](https://download.agentuxos.org/iso/stable/agentux-hyprland-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-hyprland-live-aarch64.iso) |
 | Live ISO — COSMIC (nightly) | [`agentux-cosmic-live-x86_64.iso`](https://download.agentuxos.org/iso/nightly/agentux-cosmic-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/nightly/agentux-cosmic-live-aarch64.iso) |
 | Installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-aarch64.iso) |
+| Hyprland installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-hyprland-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-hyprland-aarch64.iso) |
 | Release metadata | [`latest.json`](https://download.agentuxos.org/latest.json) · [GitHub releases](https://github.com/agentux-os/agentux-os/releases/latest) |
 
 | Boot | Live desktop | Installer |
