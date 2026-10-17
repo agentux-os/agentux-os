@@ -5,7 +5,11 @@ const containerfile = await readFile('Containerfile', 'utf8');
 const install = containerfile.slice(containerfile.indexOf('# AgentUX itself'));
 const smoke = await readFile('tests/smoke.sh', 'utf8');
 const buildWorkflow = await readFile('.github/workflows/build.yml', 'utf8');
-assert.match(containerfile, /^ARG AGENTUX_DESKTOP_VERSION=0\.5\.2$/m, 'image pins the desktop bundle release');
+// Desktop bundles exist from agentux-desktop 0.5.2 on; any later release pins too.
+const desktopPin = containerfile.match(/^ARG AGENTUX_DESKTOP_VERSION=(\d+)\.(\d+)\.(\d+)$/m);
+assert.ok(desktopPin, 'image pins a desktop bundle release');
+const [major, minor, patch] = desktopPin.slice(1).map(Number);
+assert.ok(major > 0 || minor > 5 || (minor === 5 && patch >= 2), `desktop release ${desktopPin.slice(1).join('.')} ships bundles (0.5.2 or later)`);
 
 for (const bundle of ['common', 'plasma', 'cosmic']) {
   const pin = containerfile.match(new RegExp(`^ARG AGENTUX_${bundle.toUpperCase()}_SHA256=([a-f0-9]{64})$`, 'm'));
