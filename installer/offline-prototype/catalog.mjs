@@ -11,6 +11,15 @@ const IMAGE_REPOSITORIES = Object.freeze({
   cosmic: 'ghcr.io/agentux-os/agentux-cosmic',
 });
 
+export function parseImageManifest(contents) {
+  const rows = contents.trim().split(/\r?\n/);
+  return rows.map((row) => {
+    const [variant, image, filename, ...extra] = row.split('\t');
+    if (!variant || !image || !filename || extra.length > 0) throw new Error('invalid image manifest row');
+    return { variant, image, filename };
+  });
+}
+
 function imageDigest(image, variant) {
   const repository = IMAGE_REPOSITORIES[variant];
   if (typeof image !== 'string' || !image.startsWith(`${repository}:`) && !image.startsWith(`${repository}@`)) {
@@ -90,12 +99,7 @@ export async function verifyCatalog({ catalog, payloadDir, expectedArch }) {
 async function main(args) {
   const [command, payloadDir, arch, version, manifestPath, catalogPath] = args;
   if (command === 'build' && payloadDir && arch && version && manifestPath && catalogPath) {
-    const rows = (await readFile(manifestPath, 'utf8')).trim().split(/\r?\n/);
-    const images = rows.map((row) => {
-      const [variant, image, , filename] = row.split('\t');
-      if (!variant || !image || !filename) throw new Error('invalid image manifest row');
-      return { variant, image, filename };
-    });
+    const images = parseImageManifest(await readFile(manifestPath, 'utf8'));
     const catalog = await buildCatalog({ payloadDir, arch, version, images });
     await writeFile(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, { flag: 'wx' });
     return;
