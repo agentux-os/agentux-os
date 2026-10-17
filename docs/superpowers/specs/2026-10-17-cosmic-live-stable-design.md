@@ -1,66 +1,92 @@
-# COSMIC Stable Image and Live ISO Design
+# Stable Desktop Media and Unified Offline Installer
+
+**Status:** design for review
+**Date:** 2026-10-17
 
 ## Goal
 
-Make COSMIC a supported stable AgentUX image and publish COSMIC Live ISOs for both `x86_64` and `aarch64` through the existing approved-release pipeline.
+Provide stable AgentUX downloads for Plasma, Hyprland, and COSMIC on `x86_64` and `aarch64`, while making a single offline installer per architecture that lets the user choose which one system to install. Keep each installed desktop in its own signed bootc image and update channel.
 
 ## User and business outcome
 
-People choosing COSMIC should be able to download a tested Live ISO, install AgentUX from that session, and receive signed updates from the COSMIC `:stable` channel. The website and release metadata must clearly distinguish stable artifacts from nightly builds and update automatically after each approved release.
+People should be able to try the desktop they intend to use with a dedicated Live ISO, or install any of the three desktops without internet using one clearly labeled installer ISO for their machine architecture. They should not need to understand image registries, download three installer ISOs, or risk installing a different desktop from the one selected. Stable downloads must remain verifiable and update automatically after an approved release.
 
-## Scope
+## Agreed product shape
 
-- Promote the already-built and signed `ghcr.io/agentux-os/agentux-cosmic` image to `:<version>` and `:stable` only after its candidate digest passes the release gates and the existing release approval.
-- Build and publish only COSMIC Live ISOs, for both `x86_64` and `aarch64`. Do not add an offline installer ISO for COSMIC.
-- Gate release publication on successful COSMIC live-session and installation tests for both architectures.
-- Use QEMU/KVM for `x86_64`. When the ARM runner lacks KVM, use QEMU system emulation with TCG and UEFI for `aarch64`; the test must reach the COSMIC live session and complete the installation checks. This validates the virtual platform, not every physical ARM board.
-- Publish versioned and stable ISO aliases with SHA-256 checksums and AgentUX-key signatures. Add the COSMIC image and ISO records to signed `latest.json`.
-- Update the download page so it presents COSMIC as stable after metadata advertises it, while retaining the nightly link as a fallback before the first stable release.
-- Update operator/user documentation and release notes to describe COSMIC Stable as Live-only and multi-architecture.
+- **Six stable Live ISOs:** Plasma, Hyprland, and COSMIC, each for `x86_64` and `aarch64`. They remain separate artifacts and boot directly into their named desktop.
+- **Two unified offline installer ISOs:** one for `x86_64`, one for `aarch64`. Each contains the three architecture-matched, compressed installation payloads and offers a choice of Plasma, Hyprland, or COSMIC.
+- The installer expands/writes only the selected payload to the destination disk. Installation must complete without network access. It must not install all three desktops into one system.
+- Each installed system follows the selected desktop's own signed stable image/channel. Plasma, Hyprland, and COSMIC remain independently built, released, signed, and updated.
+- Live media compression is not redesigned as part of the installer work. Live ISOs already contain a SquashFS root filesystem. A separate benchmark may evaluate compression settings, but any change must preserve boot performance and reliability and must not combine the three Live environments into one image.
 
-## Release and trust flow
+## Approaches considered
 
-1. `build.yml` continues to build, smoke-test, sign and publish the COSMIC image for both architectures on `main`. A release does not rebuild the image.
-2. `release.yml` resolves the tagged commit's immutable `sha-<commit>` COSMIC image, verifies the AgentUX key and GitHub Actions keyless signatures, and exposes that digest to downstream jobs.
-3. A COSMIC Live job builds both architectures from that exact digest and sets the installed system's tracking channel to `agentux-cosmic:stable`. Release-tag channel selection must reject a mutable or mismatched image reference.
-4. Both architecture tests must pass before the release job can proceed. The existing release environment approval remains the only step allowed to move image tags or publish stable downloads.
-5. After approval, the release job promotes the verified COSMIC digest to `:<version>` and `:stable`, then publishes both tested Live ISOs. Missing either ISO, checksum, or signature must fail publication before `latest.json` is replaced.
-6. `latest.json` is written last and includes `images.cosmic` plus both COSMIC Live ISO records (`variant: cosmic`, `kind: live`, `channel: stable`). It reports boot and installation test coverage accurately for every ISO.
+1. **One multi-payload offline ISO per architecture (recommended).** Bundle three independently produced and signed image payloads in compressed form; show a desktop selector; verify the selected payload offline; write only that payload. This meets the one-download/offline requirement while keeping installed systems and update streams separate. It adds installer, verification, and capacity complexity.
+2. **Keep three installer ISOs per architecture.** Minimal change and simple trust/install flow, but users must choose/download among six installer files, undermining the unified offline-media requirement.
+3. **One bootc image containing all three desktops.** Simpler payload selection but couples desktop dependencies, updates, storage, and support into one larger installed system. This conflicts with separate desktop variants and is not selected.
 
-Nightly `:latest` images and `iso/nightly/` artifacts remain independent and continue to move on the existing nightly schedule/dispatch. COSMIC remains absent from stable metadata until the first qualifying release is approved and published.
+## Stable image and release behavior
 
-## Architecture test and user-facing status
+- Promote `ghcr.io/agentux-os/agentux`, `agentux-hyprland`, and `agentux-cosmic` to version and `:stable` tags only through the existing approved release flow.
+- Release candidates are immutable digests. Validate the AgentUX signature and image identity before use in any Live or offline installer build.
+- COSMIC becomes stable only after its image, both architectures, live boot/install behavior, rollback, and offline installation payload pass the same release gates. Existing release approval remains mandatory.
+- The six Live ISOs are built from the release's exact signed image digests, tested, checksummed, signed, and published with versioned URLs and stable aliases.
+- Build the two offline ISOs from the same release candidate digests. Each ISO's catalog records the exact variant, architecture, digest, signature identity, compressed payload size, and checksum for every embedded payload.
+- Publish the release metadata only after all six Live ISOs and both installer ISOs, checksums, signatures, and required tests are present. Write `latest.json` last so consumers never observe a partially published release.
+- Nightly builds remain separate from stable aliases and metadata.
 
-The ARM runner currently may lack `/dev/kvm`, and the live VM harness currently requires KVM. Extend the harness to support an explicit TCG mode for the ARM release test, selecting an AArch64 UEFI `virt` machine and a TCG-compatible CPU rather than `-cpu host`. Keep KVM as the x86_64 path. Do not silently turn an ARM test into a build-only success for a stable release.
+## Offline installer architecture and trust
 
-The release notes and download page must not imply physical-board certification. They may say the artifact booted and installed in CI/VM; the supported hardware scope remains Fedora-supported UEFI systems described by the project documentation.
+- Build three architecture-specific install payloads from the same signed images used by stable release. Compress each payload for storage on ISO; do not recompress or mutate the signed image contents in a way that invalidates image verification.
+- Package an installer catalog and detached integrity/signature evidence with the payloads. The installer verifies catalog authenticity, architecture compatibility, digest, and payload integrity offline before enabling installation.
+- Present three explicit choices with desktop name, architecture, release version, compressed size, and required target-disk capacity. Default to no selection; never silently choose a desktop.
+- Stream/decompress only the selected payload to the target or bounded temporary storage. Do not require all three expanded images to fit in RAM or on the target disk simultaneously. Clearly report insufficient disk space, corrupt media, signature failure, or write failure before claiming success.
+- After writing, verify the installed deployment's image identity and ensure it tracks the selected variant's `:stable` channel. The installer must not need network to install; networking may be offered after installation for updates.
+- Preserve bootability on supported UEFI hardware for both architectures. Keep secure-boot behavior and bootloader ownership explicit and covered by tests.
+- Exact payload format and extraction mechanism are an implementation-plan decision informed by a prototype/size benchmark. Do not assume that simply placing three existing installer ISOs inside another ISO is the final design.
 
-Add separate `boot_tested` and `install_tested` metadata so the website can distinguish “booted and installed in CI”, “booted in CI; install not tested”, and “built but not boot-tested”. For this COSMIC stable gate both flags must be true for both architectures.
+## Live ISO behavior and size optimization
 
-## Website behavior
+- Keep one Live ISO per variant and architecture: six stable artifacts total. Each image contains only its own desktop and its own matching network installer target.
+- The current Live build uses Titanoboa to produce a SquashFS-backed bootable ISO; the initramfs is separately rebuilt with Zstandard. A whole-file compression pass alone is not considered a useful ISO optimization because users need bootable media.
+- Measure existing artifact sizes and boot time as the baseline. Any change to SquashFS compressor, block size, or compression level must compare output size, boot-to-desktop time, CPU/RAM use during boot, and read latency on both architectures.
+- Adopt a Live compression change only if the saved download size is material and boot reliability/performance remains within an agreed regression budget. Otherwise retain the current per-variant Live media unchanged.
+- Do not create a multi-desktop Live ISO in this scope; it would duplicate three root filesystems and could increase download size without reliable cross-image deduplication.
 
-- Before a stable COSMIC record exists, the COSMIC tab remains marked experimental/nightly and its URLs target `iso/nightly/`.
-- When `latest.json` contains stable COSMIC image and Live ISO records, the tab changes to a stable label, selects each architecture's stable URL, checksum URL, size and test status from metadata.
-- If metadata cannot be fetched, the page remains usable with its current safe fallback links; no JavaScript failure may hide Plasma or prevent downloads.
+## Website and metadata
+
+- The download page presents stable Live downloads by desktop and architecture, and one unified offline installer download per architecture.
+- Use signed `latest.json` records for version, URL, size, SHA-256, variant, architecture, media kind, stable channel, and truthful boot/install test coverage. Live records identify their exact variant; installer records identify the set of included variants and payload catalog version.
+- Keep direct stable aliases for the six Live ISOs and two installers. Retain version-pinned URLs and checksums for reproducibility.
+- If metadata is unavailable or malformed, the page keeps safe fallback links and does not hide existing downloads.
+- Document that Live installation requires network, while the unified installer is fully offline; identify supported architecture and firmware limits without implying certification of every ARM board.
+
+## Validation and acceptance criteria
+
+1. Image and release contract tests prove all three variant digests are resolved, signature-verified, architecture-matched, and promoted only after approval.
+2. Build all six Live ISOs from the release digests. Boot each architecture/variant where runner capability permits; tests must verify desktop identity, demo, installer target, stable tracking channel, and checksum/signature. An architecture without sufficient VM support must be reported as build-only and cannot silently be labeled boot-tested.
+3. For each architecture, build one offline ISO containing exactly the three matching payloads and catalog records. Inspect its contents and prove it has no network dependency during installation.
+4. VM tests exercise all three selections on each architecture where practical, and at minimum a complete unattended install for every variant on x86_64 plus ARM boot/install tests via KVM or TCG. Verify the selected image/channel after reboot and prove the other two variants were not installed.
+5. Negative installer tests cover altered catalog, wrong architecture, corrupted/truncated payload, invalid/missing signature, insufficient target capacity, and interrupted write. Fail closed without reporting a successful install.
+6. Benchmark compressed payload and ISO sizes against the current per-variant installer baseline. Record compression ratio, build time, peak disk usage, RAM, and install time. The offline ISO must be materially smaller than the sum of the three current per-variant installer ISOs; the exact acceptance threshold is set from the prototype before implementation is considered complete.
+7. Live compression benchmarks compare each candidate to the current SquashFS baseline on x86_64 and aarch64. No Live compressor change ships without material size savings and acceptable boot performance.
+8. Publisher tests prove all eight media artifacts, checksums, signatures, and release metadata are complete before aliases or `latest.json` are updated.
+9. Website tests verify all six Live choices and two installer choices, architecture labels, sizes/checksums, stable status, offline-vs-online descriptions, and safe metadata fallback.
+10. Existing Plasma/Hyprland image, Live, installer, release, signature, rollback, and website contract tests remain green.
 
 ## Out of scope
 
-- COSMIC offline installer ISO.
-- Stable COSMIC release publication during this implementation. The change prepares the pipeline; a later version tag, successful gates and release approval are required to publish.
-- Certification of specific physical ARM models or peripherals.
-- Changes to Plasma/Hyprland stable policy, release cadence, or COSMIC nightly behavior beyond truthful shared metadata.
+- Installing multiple desktop environments into one deployed system.
+- Combining the three environments into a single Live ISO.
+- Replacing or relaxing the existing release approval and signature policy.
+- Publishing new stable artifacts as part of implementation; a qualifying versioned release and approval publish them.
+- Certifying individual physical ARM boards, firmware, GPUs, or peripherals.
+- A guaranteed ISO-size number before the payload-format prototype and benchmark.
 
-## Acceptance criteria
+## Operational risks
 
-- Contract tests prove the release resolves/verifies the COSMIC digest, builds Live ISOs for both architectures from that digest, waits for both test jobs, promotes the COSMIC image only after approval, and requires both COSMIC ISO names before publication.
-- Tests prove the release channel script accepts COSMIC stable only for a valid tagged digest and does not alter nightly behavior.
-- VM-harness tests cover KVM and ARM TCG selection; the release configuration cannot skip ARM boot/install tests and still succeed.
-- Publisher tests prove both architecture artifacts, checksums, signatures, COSMIC image metadata and ISO metadata are present before `latest.json` publication.
-- Website tests prove nightly fallback and metadata-driven stable COSMIC links/statuses, while preserving the Plasma and installer links.
-- Repository contract tests pass, the website builds, and the website download-page contract passes.
-
-## Operational caveats
-
-- ARM TCG may make full installation testing materially slower than KVM; keep the release job timeout explicit and collect logs/screenshots as artifacts on failure.
-- QEMU `virt` tests do not prove compatibility with every ARM board. Report the VM scope precisely and collect real-hardware reports after release.
-- Stable promotion is atomic at the existing release-job boundary: an unapproved, rejected, or failed release must leave `:stable`, stable ISO aliases, and `latest.json` unchanged.
+- Three compressed payloads may still make the unified installer several gigabytes; the prototype must measure real release images before committing to capacity requirements.
+- Offline authenticity is a hard requirement: a checksum stored beside an untrusted payload is insufficient. The trusted catalog/signature verification path must work without network and fail closed.
+- Decompression, disk writing, and post-write verification need careful recovery behavior for power loss and media errors.
+- ARM TCG can make installation tests slow. Timeouts and evidence collection must be explicit; build success is not equivalent to boot/install validation.
+- Stable alias and metadata publication must remain atomic across eight artifacts.
