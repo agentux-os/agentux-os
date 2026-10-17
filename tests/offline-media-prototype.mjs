@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildCatalog, verifyCatalog } from '../installer/offline-prototype/catalog.mjs';
+import * as catalogModule from '../installer/offline-prototype/catalog.mjs';
+const { buildCatalog, verifyCatalog } = catalogModule;
 
 const digest = (letter) => `sha256:${letter.repeat(64)}`;
 const variants = ['plasma', 'hyprland', 'cosmic'];
@@ -29,6 +30,26 @@ try {
   assert.equal(catalog.payloads[0].imageDigest, digest('1'));
   assert.ok(catalog.payloads.every(({ size, sha256 }) => size > 0 && /^[a-f0-9]{64}$/.test(sha256)));
   assert.deepEqual(await verifyCatalog({ catalog, payloadDir, expectedArch: 'aarch64' }), { valid: true, variants });
+
+  assert.equal(typeof catalogModule.parseImageManifest, 'function', 'catalog exports the workflow manifest parser');
+  assert.deepEqual(
+    catalogModule.parseImageManifest([
+      'plasma\tghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tplasma.oci.tar.zst',
+      'hyprland\tghcr.io/agentux-os/agentux-hyprland@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\thyprland.oci.tar.zst',
+      'cosmic\tghcr.io/agentux-os/agentux-cosmic@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\tcosmic.oci.tar.zst',
+    ].join('\n')),
+    [
+      { variant: 'plasma', image: 'ghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', filename: 'plasma.oci.tar.zst' },
+      { variant: 'hyprland', image: 'ghcr.io/agentux-os/agentux-hyprland@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', filename: 'hyprland.oci.tar.zst' },
+      { variant: 'cosmic', image: 'ghcr.io/agentux-os/agentux-cosmic@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', filename: 'cosmic.oci.tar.zst' },
+    ],
+    'three-column workflow manifests map to variant, immutable image, and filename',
+  );
+  assert.throws(
+    () => catalogModule.parseImageManifest('plasma\tghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tplasma.oci.tar.zst\textra'),
+    /invalid image manifest row/,
+    'unexpected manifest columns are rejected instead of silently mis-mapped',
+  );
 
   await assert.rejects(
     () => buildCatalog({ payloadDir, arch: 'x86_64', version: 'v0.5.7', images: images.slice(0, 2) }),
