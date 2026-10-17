@@ -19,18 +19,13 @@ const pullScript = await readFile(resolve(root, '.github/scripts/pull.sh'), 'utf
 const sigpolicy = await readFile(resolve(root, 'tests/sigpolicy.sh'), 'utf8');
 const releaseWorkflow = await readFile(resolve(root, '.github/workflows/release.yml'), 'utf8');
 const readme = await readFile(resolve(root, 'README.md'), 'utf8');
-let manifest;
-try {
-  manifest = await readFile(resolve(root, 'variants/cosmic/cosmic-atomic.yaml'), 'utf8');
-} catch (error) {
-  if (error.code !== 'ENOENT') throw error;
-}
-
-assert.ok(manifest, 'COSMIC package manifest is checked in');
-assert.match(manifest, /49a848320cb7ce757a1d740840e756286c9c2078/, 'COSMIC package selection records its upstream manifest revision');
+const resolver = await readFile(resolve(root, '.github/scripts/resolve-cosmic-base.sh'), 'utf8');
 assert.match(containerfile, /plasma\|hyprland\|cosmic/, 'Containerfile accepts the cosmic variant');
 assert.match(containerfile, /cosmic\)\s+image=agentux-cosmic/, 'COSMIC has a distinct image identity');
-assert.match(containerfile, /rpm -q --quiet plasma-workspace/, 'COSMIC build rejects a Plasma base image');
+assert.match(containerfile, /rpm -q cosmic-session/, 'COSMIC build validates the upstream COSMIC Atomic base');
+assert.match(containerfile, /dnf -y install initial-setup-gui initial-setup-gui-wayland-cosmic/, 'COSMIC adds only the live install Initial Setup bridge');
+assert.doesNotMatch(containerfile, /cosmic-packages|cosmic-atomic\.yaml|dnf -y install[^\n]*cosmic-session/, 'COSMIC desktop packages are not duplicated on top of the upstream Atomic base');
+assert.match(containerfile, /io\.github\.agentux-os\.base-image="\$\{BASE_IMAGE\}"/, 'built image records the exact base image reference');
 assert.match(containerfile, /common="agentux-common-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs the shared AgentUX overlay');
 assert.match(containerfile, /cosmic="agentux-cosmic-\$\{AGENTUX_DESKTOP_VERSION\}/, 'COSMIC installs its own desktop overlay');
 const overlayInstall = containerfile.slice(containerfile.indexOf('# AgentUX itself'));
@@ -40,14 +35,9 @@ assert.ok(sharedOverlayExtraction >= 0 && sharedOverlayExtraction < cosmicOverla
 assert.match(containerfile, /^ARG AGENTUX_PLASMA_SHA256=[a-f0-9]{64}$/m, 'Plasma overlay checksum is pinned');
 assert.match(containerfile, /^ARG AGENTUX_COMMON_SHA256=[a-f0-9]{64}$/m, 'shared overlay checksum is pinned');
 assert.match(containerfile, /^ARG AGENTUX_COSMIC_SHA256=[a-f0-9]{64}$/m, 'COSMIC overlay checksum is pinned');
-assert.match(containerfile, /printf '%s\\n' "\$packages" > \/tmp\/cosmic-packages/, 'COSMIC package manifest is materialized without a pipeline');
-assert.match(containerfile, /xargs -r dnf -y install[^\n]+< \/tmp\/cosmic-packages/, 'COSMIC package names are passed without unsafe shell word splitting');
 assert.match(containerfile, /if systemctl --global cat grub-boot-success\.timer/, 'build only disables the optional GRUB timer when the base provides it');
 assert.match(bootTests, /agentux-cosmic[\s\S]*grub-boot-success\.timer|grub-boot-success\.timer[\s\S]*agentux-cosmic/, 'boot test accounts for COSMIC base not shipping the optional GRUB timer');
 assert.match(bootTests, /\. \/etc\/os-release/, 'boot test reads the image identity before applying variant-specific checks');
-assert.match(manifest, /^  - cosmic-session$/m, 'official package set includes cosmic-session');
-assert.match(manifest, /^  - cosmic-initial-setup$/m, 'official package set includes the COSMIC first-run app');
-assert.doesNotMatch(manifest, /plasma|kde/i, 'COSMIC package set contains no Plasma/KDE package');
 assert.match(smoke, /cosmic\) image_id=agentux-cosmic/, 'smoke test recognizes the COSMIC image ID');
 assert.match(smoke, /IMAGE_ID.*agentux-cosmic.*echo cosmic/s, 'smoke test infers COSMIC when no variant is passed');
 assert.match(smoke, /COSMIC session is installed/, 'smoke test checks for the COSMIC session');
@@ -78,8 +68,11 @@ assert.match(pullScript, /BASE_IMAGE/, 'base-image pull helper follows the param
 assert.match(containerfile, /transports\.docker\["ghcr\.io\/agentux-os\/agentux-cosmic"\]/, 'COSMIC repository requires the AgentUX image signature');
 assert.match(sigpolicy, /ghcr\.io\/agentux-os\/agentux-cosmic/, 'signature-policy tests cover signed and unsigned COSMIC images');
 assert.match(buildWorkflow, /variant: cosmic[\s\S]*image: agentux-cosmic/, 'nightly image workflow maps COSMIC to its dedicated repository');
-assert.match(buildWorkflow, /quay\.io\/fedora\/fedora-bootc@sha256:f2d97f1e70d557d05900d6eba9c37a29ccff9aeaf0785ba661047492cd0136bc/, 'amd64 COSMIC build uses the verified bootc digest');
-assert.match(buildWorkflow, /quay\.io\/fedora\/fedora-bootc@sha256:3588110b39357b21348ab8c6e8ce7aa50c813b92a930118e06d89ca389cc0287/, 'arm64 COSMIC build uses the verified bootc digest');
+assert.match(buildWorkflow, /resolve-cosmic-base\.sh/, 'image and smoke workflows resolve the upstream COSMIC Atomic base');
+assert.doesNotMatch(buildWorkflow, /fedora-bootc@sha256/, 'COSMIC no longer uses the Fedora bootc package-reproduction base');
+assert.match(resolver, /quay\.io\/fedora-ostree-desktops\/cosmic-atomic/, 'COSMIC base resolver uses the upstream Atomic image');
+assert.match(resolver, /\.platform\.architecture == \$arch/, 'COSMIC base resolver selects the architecture-specific image digest');
+assert.match(resolver, /printf '%s@%s/, 'COSMIC base resolver returns an immutable digest reference');
 assert.match(releaseWorkflow, /for pair in plasma=agentux hyprland=agentux-hyprland/, 'stable release candidate scope remains Plasma and Hyprland only');
 assert.doesNotMatch(releaseWorkflow, /agentux-cosmic/, 'stable release workflow does not promote COSMIC');
 assert.match(readme, /ghcr\.io\/agentux-os\/agentux-cosmic/, 'operator docs name the dedicated COSMIC image');

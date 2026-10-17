@@ -19,7 +19,7 @@
 - COSMIC Live must install and track only `ghcr.io/agentux-os/agentux-cosmic`; reject mismatched image references at build time.
 - COSMIC must not include Plasma session packages, Plasma AgentUX overlay, or Plasma-specific live desktop layout/note mechanisms.
 - Preserve shared Core, Cockpit, profile application, fake-agent demo, no-login-download behavior, and no persistent-disk writes before install.
-- Confirm upstream COSMIC Atomic image tag, bootc suitability, package set, and both architectures before depending on it. If unsuitable, follow the spec's manifest-based fallback; do not guess package names.
+- Resolve the upstream COSMIC Atomic nightly tag to immutable per-architecture digests for each build/smoke job; validate its bootc/session requirements and record the selected digest. Upstream Quay blobs expire after four weeks, so avoid long-lived digest pins. Keep COSMIC nightly-only and do not claim upstream source-signature verification unless it is separately established.
 - Keep COSMIC nightly-only until launch criteria in the spec are satisfied. Do not claim a performance win without repeatable same-machine measurements.
 - Keep changes scoped to the two named worktrees. Do not discard or rewrite unrelated user changes.
 
@@ -55,7 +55,7 @@ Do not edit `.github/workflows/iso.yml` except if a test proves the existing off
 
 **Files:** OS `Containerfile`, variant package/build helpers if present, `tests/boot.sh`, `tests/smoke.sh`, OS README build section.
 
-1. **Add a source-image preflight.** Resolve the exact Fedora COSMIC Atomic tag for the Fedora release and verify OCI manifests for `amd64` and `arm64`, bootc metadata/commands, and package manifest. Record the chosen immutable tag/digest in image documentation. If it is not a valid bootc base, use the spec's official-manifest fallback and pin/validate the manifest revision.
+1. **Add a source-image preflight.** Resolve Fedora COSMIC Atomic tag `44` to the unique Linux `amd64` or `arm64` OCI digest in each CI job, pull/build by that immutable digest, and record it in the GitHub Actions summary. Validate the base contains the COSMIC session; add only the Anaconda/Initial Setup bridge absent upstream and verify its backend path. The upstream Quay retention annotation is four weeks; no long-lived digest pin or guessed duplicate desktop package manifest is used.
 2. **Add failing variant contract tests.** Test accepted variants (`plasma`, `hyprland`, `cosmic`), reject unknown values, and assert Cosmic image metadata, required COSMIC session, shared AgentUX services/profile service, and absence of Plasma session/overlay packages. Keep existing variants' assertions unchanged.
 3. **Build the `cosmic` variant.** Add the `agentux-cosmic` repository mapping and install the Desktop shared + COSMIC artifacts. Do not install the Plasma artifact. Preserve image signature policy and Core/Cockpit/profile behavior.
 4. **Validate native builds.** Build COSMIC natively on `amd64` and `arm64`, inspect installed package manifests and image labels, then run applicable static smoke tests (`tests/smoke.sh`, `tests/boot.sh`). Record exact commands and any ARM boot-test limitation.
