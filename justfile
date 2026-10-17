@@ -105,30 +105,9 @@ lint:
     shellcheck --shell=sh live/livesys-session-extra
     podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile live/Containerfile
 
-# Move the AgentUX pins in the Containerfile to the latest releases (pre-releases included, x86_64 and aarch64 RPMs required); needs gh
+# Move AgentUX release pins only after all RPM, bundle, and checksum assets are verified; needs gh
 bump-agentux:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    latest() {
-        gh release list --repo "agentux-os/$1" --exclude-drafts --limit 1             --json tagName --jq '.[0].tagName | ltrimstr("v")'
-    }
-    core="$(latest agentux-core)"
-    desktop="$(latest agentux-desktop)"
-    sha="$(gh release download "v$desktop" --repo agentux-os/agentux-desktop         --pattern "agentux-plasma-$desktop.tar.gz.sha256" --output - | cut -d' ' -f1)"
-    [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { echo "bad sha256 for agentux-plasma-$desktop: $sha" >&2; exit 1; }
-    # The image is built for amd64 and arm64, so both releases need both RPMs.
-    assets() { gh release view "v$2" --repo "agentux-os/$1" --json assets --jq '.assets[].name'; }
-    core_assets="$(assets agentux-core "$core")"
-    desktop_assets="$(assets agentux-desktop "$desktop")"
-    missing=()
-    for arch in x86_64 aarch64; do
-        grep -qxF "agentux-$core-1.fc44.$arch.rpm" <<<"$core_assets" || missing+=("agentux-core v$core: agentux-$core-1.fc44.$arch.rpm")
-        grep -qxF "agentux-cockpit-$desktop-1.$arch.rpm" <<<"$desktop_assets" || missing+=("agentux-desktop v$desktop: agentux-cockpit-$desktop-1.$arch.rpm")
-    done
-    if (( ${#missing[@]} )); then printf 'missing release asset %s\n' "${missing[@]}" >&2; exit 1; fi
-    sed -i         -e "s/^ARG AGENTUX_CORE_VERSION=.*/ARG AGENTUX_CORE_VERSION=$core/"         -e "s/^ARG AGENTUX_DESKTOP_VERSION=.*/ARG AGENTUX_DESKTOP_VERSION=$desktop/"         -e "s/^ARG AGENTUX_PLASMA_SHA256=.*/ARG AGENTUX_PLASMA_SHA256=$sha/"         Containerfile
-    echo "agentux-core $core, agentux-desktop $desktop (plasma sha256 $sha)"
-    git diff --stat -- Containerfile
+    .github/scripts/bump-agentux.sh
 
 # Tag a release of main's HEAD (e.g. just release 0.5.2) once main has published its image; release.yml then tests it and waits for approval
 release version:

@@ -24,12 +24,28 @@ env:
   RELEASE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
 
 jobs:
+  contracts:
+    name: desktop bundle contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Contract and atomic pin tests
+        run: |
+          node tests/desktop-bundles-contract.mjs
+          node tests/cosmic-contract.mjs
+          node tests/build-workflow-contract.mjs
+          tests/bump-agentux.sh
+
   # One native build per architecture: no QEMU emulation, so the arm64 image
   # is built (and its RPM scriptlets run) on real aarch64. Each leg pushes its
   # image under a staging tag (ci-staging-<arch> from main, test-<sha>-<arch>
   # otherwise) and hands its digest to `publish`, which only works by digest.
   image:
     name: image (${{ matrix.variant }}, ${{ matrix.arch }})
+    needs: contracts
     strategy:
       fail-fast: false
       matrix:
