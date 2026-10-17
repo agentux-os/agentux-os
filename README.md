@@ -32,7 +32,19 @@
 
 The [AgentUX](https://github.com/agentux-os/agentux) Linux distribution image: a [bootc](https://containers.github.io/bootc/) image on Fedora Atomic (Kinoite, KDE Plasma), defined by a single `Containerfile` and built by CI for **x86_64 (amd64) and aarch64 (arm64)**. It ships Claude Code, Codex, OpenCode and Antigravity CLI already wired together, with the AgentUX daemon, the `aux` CLI and the cockpit on top: one interface for every agent, an agent bus between them and an orchestrator that takes work from issue to reviewed pull request.
 
-> **Status:** pre-release. The first image releases (v0.5.x) are being published now, on the `:stable` channel and as stable ISOs; the nightly `:latest` channel moves every day. See [ADR 0001](https://github.com/agentux-os/agentux/blob/main/docs/adr/0001-linux-distribution-on-fedora-atomic.md) for the design, and [Release channels](#release-channels) for what `:stable` and `:latest` mean.
+> **Status:** pre-release. The `:stable` channel and stable ISOs follow the latest approved image release; the nightly `:latest` channel moves automatically from `main`. The current version is exposed by the dynamic download badge and [`latest.json`](https://download.agentuxos.org/latest.json). See [ADR 0001](https://github.com/agentux-os/agentux/blob/main/docs/adr/0001-linux-distribution-on-fedora-atomic.md) for the design, and [Release channels](#release-channels) for what `:stable` and `:latest` mean.
+
+## Current artifacts
+
+This repository publishes the signed container images, installer ISOs and live ISOs automatically. The stable download paths below are intentionally version-free: the release workflow updates them when a release is approved, while the nightly paths are refreshed by the scheduled image/ISO workflows.
+
+| Artifact | Current channel |
+|---|---|
+| Plasma image | [`ghcr.io/agentux-os/agentux:stable`](https://github.com/agentux-os/agentux/pkgs/container/agentux) |
+| Hyprland image | [`ghcr.io/agentux-os/agentux-hyprland:stable`](https://github.com/agentux-os/agentux/pkgs/container/agentux-hyprland) |
+| Live ISO | [`agentux-live-x86_64.iso`](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-live-aarch64.iso) |
+| Installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-aarch64.iso) |
+| Release metadata | [`latest.json`](https://download.agentuxos.org/latest.json) · [GitHub releases](https://github.com/agentux-os/agentux-os/releases/latest) |
 
 | Boot | Live desktop | Installer |
 |---|---|---|
@@ -74,15 +86,14 @@ Deep reference detail is folded away in collapsible sections; click a summary to
 
 ## Variants
 
-The one `Containerfile` builds three separate images, chosen by the build argument `VARIANT`:
+The one `Containerfile` builds two images, chosen by the build argument `VARIANT`:
 
 | Image | `VARIANT` | Desktop |
 |---|---|---|
 | `ghcr.io/agentux-os/agentux` | `plasma` (default) | KDE Plasma, the AgentUX defaults described below |
 | `ghcr.io/agentux-os/agentux-hyprland` | `hyprland` | The same system plus a Hyprland session, which the login screen preselects; Plasma stays installed and selectable |
-| `ghcr.io/agentux-os/agentux-cosmic` | `cosmic` | COSMIC without Plasma; experimental and nightly-only until its install, architecture, signature, and rollback gates pass |
 
-All three are built for amd64 and arm64 and require the AgentUX signature. Plasma and Hyprland are the stable-release variants; COSMIC is deliberately excluded from `:stable` promotion. Unlike Hyprland, COSMIC has no Plasma session or overlay; cross-variant switching to it is not yet a supported path. See [Hyprland](#hyprland) for what the second one adds.
+Both are multi-arch, signed and checked the same way, and either can `bootc switch` to the other. See [Hyprland](#hyprland) for what the second one adds.
 
 ## Architectures
 
@@ -99,7 +110,7 @@ Each image repository has two channels, and an installed system follows exactly 
 | `:latest` | **Nightly** (testing): `main`, rebuilt daily for Fedora's updates | Every day, and on every merge to `main` |
 | `:<YYYYMMDD>` | One nightly build | Never |
 
-Plasma and Hyprland have both channels. COSMIC currently has only the nightly `:latest` channel and dated test builds; no `:stable` tag is created until its launch criteria pass. All three repositories are multi-arch and require the same AgentUX key signature ([Verifying the image](#verifying-the-image)).
+Both channels exist for both variants (`ghcr.io/agentux-os/agentux` and `ghcr.io/agentux-os/agentux-hyprland`), both are multi-arch, and every image in either is signed and checked the same way ([Verifying the image](#verifying-the-image)).
 
 **Which channel a system follows** is the image reference in its origin, shown by `sudo bootc status`, and `bootc upgrade` pulls whatever that tag points at:
 
@@ -329,7 +340,7 @@ cosign verify --key files/etc/pki/containers/agentux-os.pub "ghcr.io/agentux-os/
 
 An installed system checks the key signature itself on every `bootc upgrade` and `bootc switch`, because the image ships:
 
-- `/etc/containers/policy.json` adds three entries to Fedora's policy, the same in each image: `ghcr.io/agentux-os/agentux`, `ghcr.io/agentux-os/agentux-hyprland` and `ghcr.io/agentux-os/agentux-cosmic` each require a `sigstoreSigned` signature by `/etc/pki/containers/agentux-os.pub` (identity `matchRepository`, since cosign signs repositories, not tags). Every other registry keeps Fedora's rules, including the `insecureAcceptAnything` default. COSMIC remains nightly-only; this trust entry does not authorize stable promotion.
+- `/etc/containers/policy.json` with two entries added to Fedora's, the same in both images: `ghcr.io/agentux-os/agentux` and `ghcr.io/agentux-os/agentux-hyprland` each require a `sigstoreSigned` signature by `/etc/pki/containers/agentux-os.pub` (identity `matchRepository`, since cosign signs repositories, not tags). Every other registry keeps Fedora's rules, including the `insecureAcceptAnything` default.
 - `/etc/containers/registries.d/agentux-os.yaml`, which turns on `use-sigstore-attachments` for `ghcr.io/agentux-os` so the signature is fetched from the registry.
 
 An update that is unsigned or signed by another key is refused before any layer is downloaded, and the system stays on what it runs. The policy checks the key signature, not the keyless one: containers/image only matches Fulcio certificates by e-mail, and GitHub Actions certificates carry a workflow URI.
@@ -345,9 +356,9 @@ and add it by hand if it is not. Do not use `bootc switch --enforce-container-si
 <details>
 <summary>How CI checks the signatures, and where the key lives</summary>
 
-CI checks the policy the same way a system would: after signing, it runs the image's own `skopeo` with the image's own policy, registries.d and key ([`tests/sigpolicy.sh`](tests/sigpolicy.sh)), once per architecture (`skopeo --override-arch`, so it picks that architecture's image from the list as a system of that architecture would), against the signed list's digest and tag, which must pass, against an unsigned image pushed to `:ci-unsigned` in the same repository, which must be refused for lack of a signature, and against an image from another registry, which must still pass; it also checks that the policy requires the AgentUX key for all three repositories. This runs for every built variant, including COSMIC. If any of that fails, no nightly tag moves: each architecture's image is pushed first under a staging tag (`ci-staging-amd64`, `ci-staging-arm64`), the list under `ci-staging`, and the public nightly tags are copied from the list's digest, unchanged, only after every check passed. To try the publishing path from a branch, run `gh workflow run build.yml --ref <branch>`: it pushes, signs and checks `test-<sha>` (the list) and `test-<sha>-amd64` / `test-<sha>-arm64` only. A `v*` tag (through `release.yml`) continues to promote Plasma and Hyprland only; COSMIC cannot reach `:stable` through the release workflow.
+CI checks the policy the same way a system would: after signing, it runs the image's own `skopeo` with the image's own policy, registries.d and key ([`tests/sigpolicy.sh`](tests/sigpolicy.sh)), once per architecture (`skopeo --override-arch`, so it picks that architecture's image from the list as a system of that architecture would), against the signed list's digest and tag, which must pass, against an unsigned image pushed to `:ci-unsigned` in the same repository, which must be refused for lack of a signature, and against an image from another registry, which must still pass; it also checks that the policy requires the AgentUX key for both repositories. This runs for each variant's repository (`publish (plasma, agentux)`, `publish (hyprland, agentux-hyprland)`). If any of that fails, neither `:latest` nor the dated tag moves: each architecture's image is pushed first under a staging tag (`ci-staging-amd64`, `ci-staging-arm64`), the list under `ci-staging`, and the public tags are copied from the list's digest, unchanged, only after every check passed. To try the publishing path from a branch, run `gh workflow run build.yml --ref <branch>`: it pushes, signs and checks `test-<sha>` (the list) and `test-<sha>-amd64` / `test-<sha>-arm64` only. A `v*` tag (through `release.yml`) does the same with `candidate-<tag>`, and only the approved release job moves `:<tag>` and `:stable` to it.
 
-The required check, `build`, passes when all three variants build for both architectures and, outside pull requests, their nightly/test lists are published; the per-image jobs are `image (<variant>, <arch>)`, with corresponding `smoke (<variant>, <arch>)` tests. COSMIC is intentionally absent from the release workflow and receives no `:stable` promotion.
+The required check, `build`, passes when both variants built for both architectures and, outside pull requests, both lists were published; the per-image jobs are `image (plasma, amd64)`, `image (plasma, arm64)`, `image (hyprland, amd64)` and `image (hyprland, arm64)`, and the smoke tests `smoke (<variant>, <arch>)`.
 
 Every job that builds or pulls an image first pulls it with [`.github/scripts/pull.sh`](.github/scripts/pull.sh), which retries up to five times with a growing pause: quay.io's CDN drops a blob download halfway now and then (`writing blob: ... unexpected EOF`), and podman's own few quick retries used to give up and fail the whole build. `podman build` then starts from the local copy of the base image.
 
