@@ -109,6 +109,10 @@ lint:
 bump-agentux:
     .github/scripts/bump-agentux.sh
 
+# Preview the notes of a release (e.g. just release-notes v0.5.8); highlights come from docs/releases/<tag>.md; needs gh
+release-notes tag:
+    .github/scripts/release-notes.sh {{ tag }}
+
 # Tag a release of main's HEAD (e.g. just release 0.5.2) once main has published its image; release.yml then tests it and waits for approval
 release version:
     scripts/release.sh {{ version }}
