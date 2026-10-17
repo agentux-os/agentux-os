@@ -36,6 +36,7 @@ jobs:
         run: |
           node tests/desktop-bundles-contract.mjs
           node tests/cosmic-contract.mjs
+          node tests/live-desktop-contract.mjs
           node tests/build-workflow-contract.mjs
           tests/bump-agentux.sh
 

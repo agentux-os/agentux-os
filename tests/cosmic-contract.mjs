@@ -55,7 +55,7 @@ assert.match(liveTests, /agentux-cosmic/, 'live VM checks distinguish COSMIC fro
 assert.match(liveTests, /cosmic-session/, 'live VM checks the COSMIC session process');
 assert.match(liveTests, /LIVE_TEST_VARIANT.*usr\/lib\/os-release|usr\/lib\/os-release.*LIVE_TEST_VARIANT/s, 'live test handles both guest os-release checks and host-side install verification');
 assert.match(liveTests, /agentux-cosmic.*TRACK_IMAGE|TRACK_IMAGE.*agentux-cosmic/s, 'installed COSMIC verification checks the COSMIC update target');
-assert.match(liveVm, /LIVE_TEST_VARIANT.*cosmic/, 'VM test avoids Plasma-only desktop interactions for COSMIC');
+assert.match(liveVm, /LIVE_TEST_VARIANT.*plasma/, 'VM test runs Plasma-only desktop interactions only for Plasma');
 assert.match(liveVm, /agentux-cosmic:latest/, 'VM test fallback tracks the COSMIC repository');
 assert.match(liveVm, /qemu-img compare/, 'VM test proves the live session does not write to the install disk before install');
 assert.match(liveWorkflow, /options: \[plasma, hyprland, cosmic\]/, 'manual live workflow offers COSMIC');

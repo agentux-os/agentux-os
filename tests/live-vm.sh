@@ -11,9 +11,11 @@
 #    first booted as a USB stick written with dd (its hybrid MBR) up to the
 #    guest agent, with its frames in DIR/usb-boot/.
 # 2. Wait for the live user's autologin session and check it (tests/live.sh
-#    checks): Plasma and the cockpit, agentuxd with fake agents answering
+#    checks): the selected desktop (Plasma, Hyprland or COSMIC) and the cockpit,
+#    agentuxd with fake agents answering
 #    `aux ps` with the demo runs, no first-login downloads; the installer
-#    launcher only warns. Screenshots of the desktop, of the demo after
+#    launcher warns for Plasma/COSMIC and is required for Hyprland. Screenshots
+#    of the desktop, of the demo after
 #    approving its waiting run, and of the installer opened from
 #    "Install AgentUX" (best effort).
 # 3. With LIVE_TEST_INSTALL=1 (the default): install to the VM's disk with
@@ -298,7 +300,7 @@ show_desktop() {
     guest_cmd 30 'uid=$(id -u liveuser); runuser -u liveuser -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus busctl --user call org.kde.kglobalaccel /component/kwin org.kde.kglobalaccel.Component invokeShortcut s "Show Desktop"' \
         >/dev/null || echo "::warning::could not toggle Show Desktop"
 }
-if [[ "${LIVE_TEST_VARIANT:-plasma}" != cosmic ]]; then
+if [[ "${LIVE_TEST_VARIANT:-plasma}" == plasma ]]; then
     show_desktop
     sleep 3
     screenshot 02-live-desktop-shown
@@ -326,6 +328,10 @@ if grep -q anaconda "$dir/installer-processes.txt"; then
 else
     echo "::warning::the installer did not start from Install AgentUX; see 05-installer.png"
     summary_line "Install AgentUX opens the installer (best effort)" "warn: no anaconda process (05-installer.png)"
+    if [[ "${LIVE_TEST_VARIANT:-plasma}" == hyprland ]]; then
+        echo "FAIL Install AgentUX did not open Anaconda in the Hyprland session" | tee -a "$dir/installer-processes.txt"
+        system_rc=1
+    fi
 fi
 guest_cmd 60 'pkill -f "anaconda|liveinst" || true; sleep 5; pkill -9 -f "anaconda|liveinst" || true; rm -rf /run/anaconda /tmp/anaconda*.log /tmp/packaging.log' >/dev/null 2>&1 || true
 echo "::endgroup::"
