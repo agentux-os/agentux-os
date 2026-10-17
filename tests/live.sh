@@ -43,6 +43,18 @@ desktop_session_processes() {
     esac
 }
 
+# running USER NAME: a process of USER runs the program NAME. pgrep -x
+# matches the kernel's process name, cut to 15 characters
+# (lxqt-policykit-agent is "lxqt-policykit-"), so longer names are matched
+# on the command line's program instead.
+running() {
+    if (( ${#2} <= 15 )); then
+        pgrep -u "$1" -x "$2" >/dev/null
+    else
+        pgrep -u "$1" -f "^([^ ]*/)?$2( |\$)" >/dev/null
+    fi
+}
+
 ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*"; fail=1; }
 warn() { echo "warn $*"; }
@@ -130,7 +142,7 @@ phase_checks() {
         fi
     fi
     for proc in "${session_processes[@]}" agentux-cockpit; do
-        if wait_for 180 pgrep -u "$user" -x "$proc"; then ok "$proc running for $user"; else bad "$proc not running for $user"; fi
+        if wait_for 180 running "$user" "$proc"; then ok "$proc running for $user"; else bad "$proc not running for $user"; fi
     done
     if ! "$is_cosmic"; then
         local laf
