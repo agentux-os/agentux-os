@@ -1,0 +1,150 @@
+name: Offline media prototype
+
+on:
+  push:
+    branches: [feat/cosmic-live-stable]
+    paths:
+      - .github/workflows/offline-media-prototype.yml
+      - installer/offline-prototype/**
+      - tests/offline-media-prototype.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  payload-install:
+    name: payload and offline install (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            goarch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            goarch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      packages: read
+    env:
+      ARCH: ${{ matrix.arch }}
+      GOARCH: ${{ matrix.goarch }}
+      VERSION: prototype-${{ github.sha }}
+      GHCR_USER: ${{ github.actor }}
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux payload and VM tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends podman skopeo zstd qemu-utils
+          if [ "$ARCH" = x86_64 ]; then sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf; fi
+          sudo modprobe nbd max_part=8 || true
+          df -h /
+
+      - uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Run catalog contract tests
+        run: node tests/offline-media-prototype.mjs
+
+      - name: Export and authenticate all three image payloads
+        id: payloads
+        run: |
+          set -euo pipefail
+          sudo podman login ghcr.io --username "$GHCR_USER" --password-stdin <<<"$GHCR_TOKEN"
+          mkdir -p "$RUNNER_TEMP/offline-prototype/payloads" "$RUNNER_TEMP/offline-prototype/signing"
+          payload_dir="$RUNNER_TEMP/offline-prototype/payloads"
+          manifest="$RUNNER_TEMP/offline-prototype/images.tsv"
+          : >"$manifest"
+          for variant in plasma hyprland cosmic; do
+            case "$variant" in
+              plasma) repo=ghcr.io/agentux-os/agentux ;;
+              hyprland) repo=ghcr.io/agentux-os/agentux-hyprland ;;
+              cosmic) repo=ghcr.io/agentux-os/agentux-cosmic ;;
+            esac
+            digest="$(skopeo inspect --creds "$GHCR_USER:$GHCR_TOKEN" --override-arch "$GOARCH" --format '{{.Digest}}' "docker://$repo:latest")"
+            [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
+            cosign verify --key files/etc/pki/containers/agentux-os.pub "$repo@$digest" >/dev/null
+            cosign verify "$repo@$digest" \
+              --certificate-identity-regexp "^https://github.com/agentux-os/agentux-os/\.github/workflows/build\.yml@refs/heads/main$" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+            archive="$payload_dir/$variant.oci.tar"
+            compressed="$archive.zst"
+            skopeo copy --quiet --preserve-digests --override-arch "$GOARCH" \
+              --src-creds "$GHCR_USER:$GHCR_TOKEN" "docker://$repo@$digest" "oci-archive:$archive:$variant"
+            exported="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive:$variant")"
+            zstd --quiet --threads=0 -19 "$archive" --output="$compressed"
+            rm "$archive"
+            printf '%s\t%s@%s\t%s\n' "$variant" "$repo" "$exported" "$variant.oci.tar.zst" >>"$manifest"
+            printf '%s: source %s -> exported %s\n' "$variant" "$digest" "$exported"
+          done
+
+          catalog="$RUNNER_TEMP/offline-prototype/catalog.json"
+          node installer/offline-prototype/catalog.mjs build "$payload_dir" "$ARCH" "$VERSION" "$manifest" "$catalog"
+          export COSIGN_PASSWORD=prototype-only
+          (cd "$RUNNER_TEMP/offline-prototype/signing" && cosign generate-key-pair)
+          for file in "$payload_dir"/*.oci.tar.zst "$catalog"; do
+            cosign sign-blob --yes --key "$RUNNER_TEMP/offline-prototype/signing/cosign.key" \
+              --bundle "$file.sigstore.json" --tlog-upload=false "$file" >/dev/null
+            cosign verify-blob --key "$RUNNER_TEMP/offline-prototype/signing/cosign.pub" \
+              --bundle "$file.sigstore.json" --insecure-ignore-tlog "$file" >/dev/null
+          done
+          node installer/offline-prototype/catalog.mjs verify "$payload_dir" "$ARCH" "$catalog"
+          {
+            echo "### Offline payload prototype ($ARCH)"
+            echo "The three source image digests were verified with the AgentUX key and GitHub Actions identity before export. Each compressed payload and the catalog were signed with a throwaway CI key and verified locally; this key is not used for release media."
+            echo ""
+            echo '| Variant | Compressed bytes | SHA-256 |'
+            echo '|---|---:|---|'
+            for file in "$payload_dir"/*.oci.tar.zst; do
+              name="$(basename "$file")"
+              bytes="$(wc -c <"$file" | tr -d ' ')"
+              hash="$(sha256sum "$file" | cut -d' ' -f1)"
+              echo "| ${name%.oci.tar.zst} | $bytes | `$hash` |"
+            done
+            echo ""
+            echo "Catalog: `$catalog`; arch: `$ARCH`; source images: `$manifest`."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm altered payload is rejected offline
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/offline-prototype/payloads/plasma.oci.tar.zst"
+          cp "$payload" "$RUNNER_TEMP/offline-prototype/tampered.oci.tar.zst"
+          printf x >>"$RUNNER_TEMP/offline-prototype/tampered.oci.tar.zst"
+          if cosign verify-blob --key "$RUNNER_TEMP/offline-prototype/signing/cosign.pub" \
+              --bundle "$payload.sigstore.json" --insecure-ignore-tlog \
+              "$RUNNER_TEMP/offline-prototype/tampered.oci.tar.zst" >/dev/null 2>&1; then
+            echo 'tampered payload passed signature verification' >&2
+            exit 1
+          fi
+          echo 'modified payload rejected by offline signature verification' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Install the selected OCI payload onto a throwaway disk with networking disabled
+        run: |
+          set -euo pipefail
+          payload_dir="$RUNNER_TEMP/offline-prototype/payloads"
+          archive="$payload_dir/plasma.oci.tar"
+          zstd --quiet --decompress "$payload_dir/plasma.oci.tar.zst" --output="$archive"
+          source_digest="$(awk -F '\t' '$1 == "plasma" {sub(/^.*@/, "", $2); print $2}' "$RUNNER_TEMP/offline-prototype/images.tsv")"
+          source_repo=ghcr.io/agentux-os/agentux
+          sudo podman load --input "$archive"
+          local_image="$(sudo podman images --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)agentux(:|-)')"
+          test -n "$local_image"
+          sudo qemu-img create -q -f qcow2 "$RUNNER_TEMP/offline-prototype/target.qcow2" 40G
+          sudo qemu-nbd --connect=/dev/nbd0 "$RUNNER_TEMP/offline-prototype/target.qcow2"
+          trap 'sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true' EXIT
+          sudo podman run --rm --privileged --pid=host --network=none \
+            --security-opt label=type:unconfined_t \
+            -v /dev:/dev -v /run/udev:/run/udev:ro -v "$archive:/run/agentux-source.oci.tar:ro" \
+            "$local_image" bootc install to-disk \
+              --source-imgref=oci-archive:/run/agentux-source.oci.tar \
+              --target-imgref="$source_repo:stable" --skip-fetch-check --wipe /dev/nbd0
+          sudo qemu-nbd --disconnect /dev/nbd0
+          trap - EXIT
+          echo "Bootc wrote the selected Plasma payload ($source_digest) to a throwaway $ARCH qcow2 disk with the container network disabled." >>"$GITHUB_STEP_SUMMARY"
+          ls -lh "$RUNNER_TEMP/offline-prototype/target.qcow2" >>"$GITHUB_STEP_SUMMARY"
