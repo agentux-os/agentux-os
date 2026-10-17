@@ -47,6 +47,7 @@ desktop_session_processes() {
 # matches the kernel's process name, cut to 15 characters
 # (lxqt-policykit-agent is "lxqt-policykit-"), so longer names are matched
 # on the command line's program instead.
+# shellcheck disable=SC2317 # called through wait_for
 running() {
     if (( ${#2} <= 15 )); then
         pgrep -u "$1" -x "$2" >/dev/null
