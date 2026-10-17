@@ -77,7 +77,7 @@ jobs:
             skopeo copy --quiet --preserve-digests --override-arch "$GOARCH" \
               --src-creds "$GHCR_USER:$GHCR_TOKEN" "docker://$repo@$digest" "oci-archive:$archive:$variant"
             exported="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive:$variant")"
-            zstd --quiet --threads=0 -19 "$archive" --output="$compressed"
+            zstd --quiet --threads=0 -19 "$archive" -o "$compressed"
             rm "$archive"
             printf '%s\t%s@%s\t%s\n' "$variant" "$repo" "$exported" "$variant.oci.tar.zst" >>"$manifest"
             printf '%s: source %s -> exported %s\n' "$variant" "$digest" "$exported"
@@ -129,7 +129,7 @@ jobs:
           set -euo pipefail
           payload_dir="$RUNNER_TEMP/offline-prototype/payloads"
           archive="$payload_dir/plasma.oci.tar"
-          zstd --quiet --decompress "$payload_dir/plasma.oci.tar.zst" --output="$archive"
+          zstd --quiet --decompress "$payload_dir/plasma.oci.tar.zst" -o "$archive"
           source_digest="$(awk -F '\t' '$1 == "plasma" {sub(/^.*@/, "", $2); print $2}' "$RUNNER_TEMP/offline-prototype/images.tsv")"
           source_repo=ghcr.io/agentux-os/agentux
           sudo podman load --input "$archive"
