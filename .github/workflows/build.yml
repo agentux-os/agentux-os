@@ -393,6 +393,9 @@ jobs:
       - name: Build workflow contract
         run: node tests/build-workflow-contract.mjs
 
+      - name: Release workflow contract
+        run: node tests/release-workflow-contract.mjs
+
       - name: shellcheck
         run: |
           shellcheck installer/brand-iso.sh files/usr/bin/agentux-version files/usr/bin/agentux files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*

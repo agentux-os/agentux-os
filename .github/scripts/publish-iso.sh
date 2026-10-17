@@ -218,14 +218,16 @@ AgentUX $tag.
 
 ISOs are hosted on download.agentuxos.org (GitHub limits release files to 2 GiB). Each has a \`.sha256\` checksum, attached here and next to the ISO, signed with the AgentUX key.
 
-| | x86_64 | aarch64 |
+| Variant / ISO | x86_64 | aarch64 |
 |---|---|---|
-| **Live ISO**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-live-$tag-x86_64") | $(link "agentux-live-$tag-aarch64") |
-| **Installer ISO**: offline install | $(link "agentux-$tag-x86_64") | $(link "agentux-$tag-aarch64") |
+| **Plasma Live**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-live-$tag-x86_64") | $(link "agentux-live-$tag-aarch64") |
+| **Plasma Installer**: offline install | $(link "agentux-$tag-x86_64") | $(link "agentux-$tag-aarch64") |
+| **Hyprland Live**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-hyprland-live-$tag-x86_64") | $(link "agentux-hyprland-live-$tag-aarch64") |
+| **Hyprland Installer**: offline install | $(link "agentux-hyprland-$tag-x86_64") | $(link "agentux-hyprland-$tag-aarch64") |
 
-Both x86_64 ISOs were booted and installed in a VM before this release was published, and the installed systems checked: the live ISO from its live session, the installer ISO unattended. The aarch64 ISOs are built natively but not boot-tested: GitHub's arm64 runners have no KVM.
+The x86_64 ISOs were booted and their installed systems checked in a VM before this release was published: live ISOs from their live sessions and installer ISOs unattended. The aarch64 ISOs are built natively but not boot-tested: GitHub's arm64 runners have no KVM.
 
-The newest release's ISOs are always at \`$base/iso/stable/\` (\`agentux-live-x86_64.iso\`, \`agentux-x86_64.iso\`, and the \`aarch64\` ones).
+The newest release's ISOs are always at \`$base/iso/stable/\`: \`agentux-live\`, \`agentux\`, \`agentux-hyprland-live\`, and \`agentux-hyprland\`, each with \`x86_64\` and \`aarch64\` variants.
 
 Verify a download:
 
@@ -239,8 +241,11 @@ cosign verify-blob --key https://raw.githubusercontent.com/agentux-os/agentux-os
 
 This release's images are \`ghcr.io/agentux-os/agentux:$tag\` and \`ghcr.io/agentux-os/agentux-hyprland:$tag\`, and the **stable** channel (\`:stable\`) now points at them. Systems installed from these ISOs follow \`:stable\` and update with \`bootc upgrade\`; to follow the nightly builds instead, \`sudo bootc switch ghcr.io/agentux-os/agentux:latest\`. See the [README](https://github.com/agentux-os/agentux-os#release-channels).
 EOF
-gh release view "$tag" >/dev/null 2>&1 \
-    || gh release create "$tag" "${pre[@]}" --verify-tag --title "AgentUX $tag" --notes-file "$notes"
+if gh release view "$tag" >/dev/null 2>&1; then
+    gh release edit "$tag" "${pre[@]}" --verify-tag --title "AgentUX $tag" --notes-file "$notes"
+else
+    gh release create "$tag" "${pre[@]}" --verify-tag --title "AgentUX $tag" --notes-file "$notes"
+fi
 assets=(SHA256SUMS SHA256SUMS.sigstore.json)
 for name in "${published[@]}"; do assets+=("$name.iso.sha256" "$name.iso.sha256.sigstore.json"); done
 gh release upload "$tag" --clobber "${assets[@]}"
