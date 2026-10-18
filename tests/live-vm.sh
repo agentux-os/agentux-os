@@ -11,10 +11,10 @@
 #    first booted as a USB stick written with dd (its hybrid MBR) up to the
 #    guest agent, with its frames in DIR/usb-boot/.
 # 2. Wait for the live user's autologin session and check it (tests/live.sh
-#    checks): the selected desktop (Plasma, Hyprland or COSMIC) and the cockpit,
+#    checks): the selected desktop (Plasma or COSMIC) and the cockpit,
 #    agentuxd with fake agents answering
 #    `aux ps` with the demo runs, no first-login downloads; the installer
-#    launcher warns for Plasma/COSMIC and is required for Hyprland. Screenshots
+#    launcher only warns. Screenshots
 #    of the desktop, of the demo after
 #    approving its waiting run, and of the installer opened from
 #    "Install AgentUX" (best effort).
@@ -328,10 +328,6 @@ if grep -q anaconda "$dir/installer-processes.txt"; then
 else
     echo "::warning::the installer did not start from Install AgentUX; see 05-installer.png"
     summary_line "Install AgentUX opens the installer (best effort)" "warn: no anaconda process (05-installer.png)"
-    if [[ "${LIVE_TEST_VARIANT:-plasma}" == hyprland ]]; then
-        echo "FAIL Install AgentUX did not open Anaconda in the Hyprland session" | tee -a "$dir/installer-processes.txt"
-        system_rc=1
-    fi
 fi
 guest_cmd 60 'pkill -f "anaconda|liveinst" || true; sleep 5; pkill -9 -f "anaconda|liveinst" || true; rm -rf /run/anaconda /tmp/anaconda*.log /tmp/packaging.log' >/dev/null 2>&1 || true
 echo "::endgroup::"
@@ -399,7 +395,6 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     track_image="${LIVE_TRACK_IMAGE:-}"
     if [[ -z "$track_image" ]]; then
         track_image=ghcr.io/agentux-os/agentux:latest
-        [[ "$(basename "$iso")" == *hyprland* ]] && track_image=ghcr.io/agentux-os/agentux-hyprland:latest
         [[ "$(basename "$iso")" == *cosmic* ]] && track_image=ghcr.io/agentux-os/agentux-cosmic:latest
     fi
     sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TEST_VARIANT="${LIVE_TEST_VARIANT:-plasma}" \

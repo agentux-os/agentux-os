@@ -20,7 +20,7 @@ const sigpolicy = await readFile(resolve(root, 'tests/sigpolicy.sh'), 'utf8');
 const releaseWorkflow = await readFile(resolve(root, '.github/workflows/release.yml'), 'utf8');
 const readme = await readFile(resolve(root, 'README.md'), 'utf8');
 const resolver = await readFile(resolve(root, '.github/scripts/resolve-cosmic-base.sh'), 'utf8');
-assert.match(containerfile, /plasma\|hyprland\|cosmic/, 'Containerfile accepts the cosmic variant');
+assert.match(containerfile, /plasma\|cosmic/, 'Containerfile accepts the cosmic variant');
 assert.match(containerfile, /cosmic\)\s+image=agentux-cosmic/, 'COSMIC has a distinct image identity');
 assert.match(containerfile, /rpm -q cosmic-session/, 'COSMIC build validates the upstream COSMIC Atomic base');
 assert.match(containerfile, /dnf -y install initial-setup-gui initial-setup-gui-wayland-cosmic/, 'COSMIC adds only the live install Initial Setup bridge');
@@ -58,7 +58,7 @@ assert.match(liveTests, /agentux-cosmic.*TRACK_IMAGE|TRACK_IMAGE.*agentux-cosmic
 assert.match(liveVm, /LIVE_TEST_VARIANT.*plasma/, 'VM test runs Plasma-only desktop interactions only for Plasma');
 assert.match(liveVm, /agentux-cosmic:latest/, 'VM test fallback tracks the COSMIC repository');
 assert.match(liveVm, /qemu-img compare/, 'VM test proves the live session does not write to the install disk before install');
-assert.match(liveWorkflow, /options: \[plasma, hyprland, cosmic\]/, 'manual live workflow offers COSMIC');
+assert.match(liveWorkflow, /options: \[plasma, cosmic\]/, 'manual live workflow offers COSMIC');
 assert.match(liveWorkflow, /agentux-cosmic/, 'live workflow maps COSMIC to its own image repository');
 assert.match(liveWorkflow, /agentux-cosmic-live/, 'COSMIC ISO has a distinct artifact prefix');
 assert.match(liveWorkflow, /COSMIC.*nightly|nightly.*COSMIC/s, 'live workflow labels COSMIC as nightly-only');
@@ -73,7 +73,7 @@ assert.doesNotMatch(buildWorkflow, /fedora-bootc@sha256/, 'COSMIC no longer uses
 assert.match(resolver, /quay\.io\/fedora-ostree-desktops\/cosmic-atomic/, 'COSMIC base resolver uses the upstream Atomic image');
 assert.match(resolver, /\.platform\.architecture == \$arch/, 'COSMIC base resolver selects the architecture-specific image digest');
 assert.match(resolver, /printf '%s@%s/, 'COSMIC base resolver returns an immutable digest reference');
-assert.match(releaseWorkflow, /for pair in plasma=agentux hyprland=agentux-hyprland/, 'stable release candidate scope remains Plasma and Hyprland only');
+assert.match(releaseWorkflow, /for pair in plasma=agentux; do/, 'stable release candidate scope remains Plasma only');
 assert.doesNotMatch(releaseWorkflow, /agentux-cosmic/, 'stable release workflow does not promote COSMIC');
 assert.match(readme, /ghcr\.io\/agentux-os\/agentux-cosmic/, 'operator docs name the dedicated COSMIC image');
 assert.match(readme, /COSMIC.*nightly-only|nightly-only.*COSMIC/s, 'operator docs state the COSMIC stable-release gate');

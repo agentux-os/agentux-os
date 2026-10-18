@@ -10,7 +10,7 @@
 #     copies onto the ISO; on x86_64 GRUB's BIOS modules, which
 #     live/bios-iso.sh adds to the ISO (Titanoboa's is UEFI only);
 #   - livesys-scripts: a passwordless `liveuser` logged in automatically
-#     into Plasma (or AgentUX Hyprland), with Fedora's live tweaks;
+#     into Plasma (or COSMIC), with Fedora's live tweaks;
 #   - no ~1 GB of downloads into RAM at login: the agent CLIs' first-login
 #     unit is not started at login but on demand ("Try the agent CLIs in
 #     this session" in the application menu), and
@@ -33,7 +33,6 @@ src=/tmp/live
 . /usr/lib/os-release
 case "${IMAGE_ID:-}" in
     agentux) label=AgentUX-Live title=AgentUX ;;
-    agentux-hyprland) label=AgentUX-Hyprland-Live title="AgentUX Hyprland" ;;
     agentux-cosmic) label=AgentUX-COSMIC-Live title="AgentUX COSMIC" ;;
     *) echo "not an AgentUX image (IMAGE_ID=${IMAGE_ID:-unset})" >&2; exit 1 ;;
 esac
@@ -229,7 +228,7 @@ cp -v "$src"/cockpit-branding/* "$branding/"
 test -f "$branding/branding.css" && test -f "$branding/logo.png"
 
 # An Anaconda profile for AgentUX, picked by os-release's ID and VARIANT_ID.
-# Plasma/Hyprland use Kinoite's Btrfs/ostree defaults; COSMIC is based on
+# Plasma uses Kinoite's Btrfs/ostree defaults; COSMIC is based on
 # generic Fedora bootc and must inherit Fedora's installer defaults instead.
 base_profile=fedora-kinoite
 if [[ "$IMAGE_ID" == agentux-cosmic ]]; then base_profile=fedora; fi

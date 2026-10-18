@@ -10,9 +10,7 @@ const readme = await readFile(resolve(root, 'README.md'), 'utf8');
 
 for (const [job, variant, image] of [
   ['iso-plasma', 'plasma', 'agentux@${{ needs.candidate.outputs.plasma }}'],
-  ['iso-hyprland', 'hyprland', 'agentux-hyprland@${{ needs.candidate.outputs.hyprland }}'],
   ['live-plasma', 'plasma', 'agentux@${{ needs.candidate.outputs.plasma }}'],
-  ['live-hyprland', 'hyprland', 'agentux-hyprland@${{ needs.candidate.outputs.hyprland }}'],
 ]) {
   const start = workflow.indexOf(`  ${job}:`);
   assert.ok(start >= 0, `release defines ${job}`);
@@ -24,19 +22,14 @@ for (const [job, variant, image] of [
   assert.ok(block.includes(image), `${job} uses the ${variant} candidate digest`);
 }
 
-assert.match(workflow, /needs: \[candidate, boot, iso-plasma, iso-hyprland, live-plasma, live-hyprland\]/,
-  'publication waits for all tested Plasma and Hyprland ISO jobs');
-assert.match(workflow, /variant: hyprland[\s\S]*?image: ghcr\.io\/\$\{\{ github\.repository_owner \}\}\/agentux-hyprland@\$\{\{ needs\.candidate\.outputs\.hyprland \}\}/,
-  'Hyprland ISOs use the tagged Hyprland image digest');
+assert.match(workflow, /needs: \[candidate, boot, iso-plasma, live-plasma\]/,
+  'publication waits for all tested Plasma ISO jobs');
+assert.doesNotMatch(workflow, /hyprland/i, 'the retired Hyprland variant is not released');
 const expectedNames = [
   'agentux-${{ github.ref_name }}-x86_64',
   'agentux-${{ github.ref_name }}-aarch64',
   'agentux-live-${{ github.ref_name }}-x86_64',
   'agentux-live-${{ github.ref_name }}-aarch64',
-  'agentux-hyprland-${{ github.ref_name }}-x86_64',
-  'agentux-hyprland-${{ github.ref_name }}-aarch64',
-  'agentux-hyprland-live-${{ github.ref_name }}-x86_64',
-  'agentux-hyprland-live-${{ github.ref_name }}-aarch64',
 ];
 const expectStart = workflow.indexOf('          EXPECT:');
 const expectEnd = workflow.indexOf('        run:', expectStart);
@@ -49,13 +42,10 @@ assert.doesNotMatch(workflow, /agentux-cosmic/, 'COSMIC is not promoted by stabl
 for (const name of [
   'agentux-live-$tag-x86_64', 'agentux-live-$tag-aarch64',
   'agentux-$tag-x86_64', 'agentux-$tag-aarch64',
-  'agentux-hyprland-live-$tag-x86_64', 'agentux-hyprland-live-$tag-aarch64',
-  'agentux-hyprland-$tag-x86_64', 'agentux-hyprland-$tag-aarch64',
 ]) {
   assert.ok(publisher.includes(name), `release notes link the ${name} ISO`);
 }
-assert.match(readme, /agentux-hyprland-live-x86_64\.iso[\s\S]*agentux-hyprland-x86_64\.iso/,
-  'download documentation lists the newest Hyprland stable live and installer ISOs');
+assert.match(publisher, /iso\/stable\/ holds the newest release only/, 'the stable channel drops ISOs a release no longer ships');
 assert.match(publisher, /--title "AgentUX \$tag"/, 'release title uses the generated version, not a stale hard-coded version');
 assert.match(publisher, /gh release edit "\$tag"[\s\S]*?--notes-file "\$notes"/,
   'rerunning publication corrects an existing release title and description');

@@ -7,13 +7,13 @@ name: Release
 # not a fresh build that would pull newer Fedora packages.
 #
 #   1. candidate the tag must be on main and main must have published
-#                sha-<commit> for it; resolve both images to their digests
-#                once and check their signatures (the AgentUX key and
+#                sha-<commit> for it; resolve its image to its digest
+#                once and check its signatures (the AgentUX key and
 #                keyless).
 #   2. boot      boot.yml boots that plasma digest in QEMU/KVM and runs
 #                tests/boot.sh on it.
-#      iso, live the installer and live ISOs (Plasma and Hyprland, x86_64 and
-#                aarch64), built from their matching digests and following
+#      iso, live the installer and live ISOs (Plasma, x86_64 and
+#                aarch64), built from the plasma digest and following
 #                :stable; x86_64 ISOs are installed in a VM. COSMIC remains
 #                nightly-only. ISOs are only built here.
 #   3. release   waits for the owner's approval (the `release` environment:
@@ -45,7 +45,6 @@ jobs:
       packages: read
     outputs:
       plasma: ${{ steps.digests.outputs.plasma }}
-      hyprland: ${{ steps.digests.outputs.hyprland }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,7 +71,7 @@ jobs:
         run: |
           echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           tag="sha-${GITHUB_SHA::12}"
-          for pair in plasma=agentux hyprland=agentux-hyprland; do
+          for pair in plasma=agentux; do
             repo="ghcr.io/$OWNER/${pair#*=}"
             if ! raw="$(skopeo inspect --raw --creds "${{ github.actor }}:$TOKEN" "docker://$repo:$tag")"; then
               echo "::error::$repo:$tag does not exist: main has not published an image for $GITHUB_SHA (wait for its Build image run, or tag a commit that has one)"
@@ -111,19 +110,6 @@ jobs:
       channel: stable
     secrets: inherit
 
-  iso-hyprland:
-    needs: candidate
-    uses: ./.github/workflows/iso.yml
-    permissions:
-      contents: read
-      packages: read
-      actions: read
-    with:
-      variant: hyprland
-      image: ghcr.io/${{ github.repository_owner }}/agentux-hyprland@${{ needs.candidate.outputs.hyprland }}
-      channel: stable
-    secrets: inherit
-
   live-plasma:
     needs: candidate
     uses: ./.github/workflows/live.yml
@@ -138,25 +124,11 @@ jobs:
       channel: stable
     secrets: inherit
 
-  live-hyprland:
-    needs: candidate
-    uses: ./.github/workflows/live.yml
-    permissions:
-      contents: read
-      packages: read
-      actions: read
-    with:
-      variant: hyprland
-      arch: both
-      image: ghcr.io/${{ github.repository_owner }}/agentux-hyprland@${{ needs.candidate.outputs.hyprland }}
-      channel: stable
-    secrets: inherit
-
   # The gate: this job waits for the owner's approval in the `release`
   # environment. Its R2 credentials (and a copy of the signing key) are
   # environment secrets, so only an approved v* tag run can publish.
   release:
-    needs: [candidate, boot, iso-plasma, iso-hyprland, live-plasma, live-hyprland]
+    needs: [candidate, boot, iso-plasma, live-plasma]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     environment:
@@ -201,13 +173,11 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PLASMA: ${{ needs.candidate.outputs.plasma }}
-          HYPRLAND: ${{ needs.candidate.outputs.hyprland }}
         run: |
           echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           echo "$TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
           echo "## Promoted" >> "$GITHUB_STEP_SUMMARY"
           .github/scripts/promote.sh "ghcr.io/$OWNER/agentux" "$PLASMA" "$GITHUB_REF_NAME" stable
-          .github/scripts/promote.sh "ghcr.io/$OWNER/agentux-hyprland" "$HYPRLAND" "$GITHUB_REF_NAME" stable
 
       - uses: actions/download-artifact@v4
         with:
@@ -224,12 +194,9 @@ jobs:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
           PLASMA_DIGEST: ${{ needs.candidate.outputs.plasma }}
-          HYPRLAND_DIGEST: ${{ needs.candidate.outputs.hyprland }}
           EXPECT: >-
             agentux-${{ github.ref_name }}-x86_64 agentux-${{ github.ref_name }}-aarch64
             agentux-live-${{ github.ref_name }}-x86_64 agentux-live-${{ github.ref_name }}-aarch64
-            agentux-hyprland-${{ github.ref_name }}-x86_64 agentux-hyprland-${{ github.ref_name }}-aarch64
-            agentux-hyprland-live-${{ github.ref_name }}-x86_64 agentux-hyprland-live-${{ github.ref_name }}-aarch64
         run: |
           ls -lh "$RUNNER_TEMP/isos"
           echo "## Published" >> "$GITHUB_STEP_SUMMARY"

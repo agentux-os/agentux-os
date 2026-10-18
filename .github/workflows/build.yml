@@ -8,10 +8,10 @@ on:
     - cron: "0 6 * * *" # daily, to pick up Fedora updates
   workflow_dispatch:
 
-# Three images from the one Containerfile (build arg VARIANT): Plasma,
-# Hyprland, and COSMIC each have a separate repository. All are built and
-# signed on nightly/test channels; release.yml deliberately promotes only
-# Plasma and Hyprland until COSMIC passes its launch gate.
+# Two images from the one Containerfile (build arg VARIANT): Plasma and
+# COSMIC each have a separate repository. Both are built and signed on
+# nightly/test channels; release.yml deliberately promotes only Plasma until
+# COSMIC passes its launch gate. (Hyprland was retired after v0.5.9.)
 env:
   # Pushes from main (push, schedule, dispatch) publish, once signed,
   # verified and smoke-tested, a dated tag, sha-<commit> and :latest. A
@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [plasma, hyprland, cosmic]
+        variant: [plasma, cosmic]
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -59,8 +59,6 @@ jobs:
             runner: ubuntu-24.04-arm
           - variant: plasma
             image: agentux
-          - variant: hyprland
-            image: agentux-hyprland
           - variant: cosmic
             arch: amd64
             runner: ubuntu-24.04
@@ -201,8 +199,6 @@ jobs:
         include:
           - variant: plasma
             image: agentux
-          - variant: hyprland
-            image: agentux-hyprland
           - variant: cosmic
             image: agentux-cosmic
     runs-on: ubuntu-24.04
@@ -415,7 +411,7 @@ jobs:
 
       - name: shellcheck
         run: |
-          shellcheck installer/brand-iso.sh files/usr/bin/agentux-version files/usr/bin/agentux files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
+          shellcheck installer/brand-iso.sh files/usr/bin/agentux-version files/usr/bin/agentux files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh .github/scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
           shellcheck --shell=sh live/livesys-session-extra
 
       - name: hadolint

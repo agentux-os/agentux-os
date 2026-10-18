@@ -12,7 +12,7 @@ on:
       variant:
         description: Image variant (COSMIC is experimental and nightly-only)
         type: choice
-        options: [plasma, hyprland, cosmic]
+        options: [plasma, cosmic]
         default: plasma
       arch:
         description: Architecture (arm64 builds the ISO but cannot boot-test it without KVM on the runner)
@@ -66,11 +66,11 @@ on:
 env:
   # What the live system is built from: an explicit image (release.yml passes
   # the tag's digest), or the variant's :latest.
-  IMAGE: ${{ inputs.image || (inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic:latest') || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
-  REPO: ${{ inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic' || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland') || 'ghcr.io/agentux-os/agentux' }}
+  IMAGE: ${{ inputs.image || (inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
+  REPO: ${{ inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic' || 'ghcr.io/agentux-os/agentux' }}
   CHANNEL: ${{ inputs.channel || 'latest' }}
-  # COSMIC has a distinct nightly artifact name; Plasma/Hyprland stay unchanged.
-  ISO_PREFIX: ${{ inputs.variant == 'cosmic' && 'agentux-cosmic-live' || (inputs.variant == 'hyprland' && 'agentux-hyprland-live') || 'agentux-live' }}
+  # COSMIC has a distinct nightly artifact name; Plasma's stays unchanged.
+  ISO_PREFIX: ${{ inputs.variant == 'cosmic' && 'agentux-cosmic-live' || 'agentux-live' }}
   LIVE_IMAGE: localhost/agentux-live:ci
   # ublue-os/titanoboa, pinned (main of 2026-05-19, "Only use container
   # images as the only source of truth"); its helper container too.

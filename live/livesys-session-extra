@@ -25,8 +25,3 @@ fi
 # script, with noteId agentux-live).
 install -D -m 0644 /usr/share/agentux/live/note.html \
     /home/liveuser/.local/share/plasma_notes/agentux-live
-
-# The hyprland image logs in to its own session, as its login screen would.
-if [ -f /usr/share/wayland-sessions/agentux-hyprland.desktop ]; then
-    sed -i 's/^Session=.*/Session=agentux-hyprland.desktop/' /etc/plasmalogin.conf
-fi

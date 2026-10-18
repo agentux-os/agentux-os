@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       variant:
-        description: Image variant to build the installer from (plasma is ghcr.io/agentux-os/agentux, hyprland is ghcr.io/agentux-os/agentux-hyprland)
+        description: Image variant to build the installer from (plasma is ghcr.io/agentux-os/agentux)
         type: choice
-        options: [plasma, hyprland]
+        options: [plasma]
         default: plasma
       image:
         description: Image to build the installer from instead of the variant's :latest (e.g. a test-<sha> tag or a digest)
@@ -52,11 +52,11 @@ on:
 env:
   # What the ISO is built from: an explicit image (release.yml passes the
   # tag's digest), or the variant's :latest.
-  IMAGE: ${{ inputs.image || (inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
-  REPO: ${{ inputs.variant == 'hyprland' && 'ghcr.io/agentux-os/agentux-hyprland' || 'ghcr.io/agentux-os/agentux' }}
+  IMAGE: ${{ inputs.image || 'ghcr.io/agentux-os/agentux:latest' }}
+  REPO: ghcr.io/agentux-os/agentux
   CHANNEL: ${{ inputs.channel || 'latest' }}
-  # The ISO's file name: agentux-<version>-<arch> or agentux-hyprland-<version>-<arch>.
-  ISO_PREFIX: ${{ inputs.variant == 'hyprland' && 'agentux-hyprland' || 'agentux' }}
+  # The ISO's file name: agentux-<version>-<arch>.
+  ISO_PREFIX: agentux
   BIB: quay.io/centos-bootc/bootc-image-builder:latest
 
 jobs:

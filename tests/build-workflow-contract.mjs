@@ -8,7 +8,7 @@ const workflow = await readFile(resolve(root, '.github/workflows/build.yml'), 'u
 const imageJob = workflow.slice(workflow.indexOf('  image:'), workflow.indexOf('  publish:'));
 const publishJob = workflow.slice(workflow.indexOf('  publish:'), workflow.indexOf('  build:'));
 
-assert.match(imageJob, /variant: \[plasma, hyprland, cosmic\]/, 'image matrix covers all desktop variants');
+assert.match(imageJob, /variant: \[plasma, cosmic\]/, 'image matrix covers all desktop variants');
 assert.match(imageJob, /needs: contracts/, 'image builds wait for desktop bundle and pin contracts');
 assert.match(imageJob, /arch: \[amd64, arm64\]/, 'image matrix covers both native architectures');
 assert.match(imageJob, /runner: ubuntu-24\.04-arm/, 'arm64 continues to use its native runner');

@@ -38,7 +38,6 @@ fail=0
 desktop_session_processes() {
     case "$1" in
         agentux-cosmic) printf '%s\n' cosmic-session cosmic-comp ;;
-        agentux-hyprland) printf '%s\n' Hyprland lxqt-policykit-agent ;;
         *) printf '%s\n' kwin_wayland plasmashell ;;
     esac
 }
@@ -134,12 +133,6 @@ phase_checks() {
             ok "COSMIC is the active desktop session"
         else
             bad "active desktop is not COSMIC ($(loginctl show-session "$session" -P Desktop))"
-        fi
-    elif [[ "$image_id" == agentux-hyprland ]]; then
-        if [[ "$(loginctl show-session "$session" -P Desktop)" == *Hyprland* ]]; then
-            ok "Hyprland is the active desktop session"
-        else
-            bad "active desktop is not Hyprland ($(loginctl show-session "$session" -P Desktop))"
         fi
     fi
     for proc in "${session_processes[@]}" agentux-cockpit; do
