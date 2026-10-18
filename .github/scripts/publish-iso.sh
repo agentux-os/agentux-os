@@ -211,7 +211,7 @@ pre=()
 # Pre-releases while AgentUX is pre-1.0.
 [[ $tag == v0.* ]] && pre=(--prerelease)
 notes=$(mktemp)
-"$here/release-notes.sh" "$tag" >"$notes"
+bash "$here/release-notes.sh" "$tag" >"$notes"
 cat >>"$notes" <<EOF
 ## Downloads
 
