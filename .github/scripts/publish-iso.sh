@@ -15,8 +15,8 @@
 #            one in iso/stable/ (agentux-live-x86_64.iso); then the GitHub
 #            release is created with the checksums and the links, and
 #            latest.json moves to the release. EXPECT lists the ISO names
-#            (without .iso) the release must have; PLASMA_DIGEST and
-#            HYPRLAND_DIGEST (optional) are the promoted images' digests,
+#            (without .iso) the release must have; PLASMA_DIGEST
+#            (optional) is the promoted image's digest,
 #            for latest.json.
 #
 # Layout of the bucket:
@@ -111,7 +111,7 @@ if [[ $mode == release ]]; then
 fi
 
 cd "$dir"
-published=()
+published=() aliases=()
 for iso in "${isos[@]}"; do
     name=$(basename "$iso" .iso)
     arch=${name##*-}
@@ -163,7 +163,21 @@ for iso in "${isos[@]}"; do
     } >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
     echo "published $name.iso as $base/$channel/$alias.iso"
     published+=("$name")
+    aliases+=("$alias")
 done
+
+# iso/stable/ holds the newest release only: drop the ISOs a release no
+# longer ships (the retired Hyprland ones after v0.5.9), with their checksums,
+# before SHA256SUMS is rebuilt from what is left.
+if [[ $mode == release ]]; then
+    s3 ls "s3://$bucket/$channel/" | awk '{print $4}' | grep -E '\.iso(\.sha256(\.sigstore\.json)?)?$' |
+        while read -r f; do
+            if [[ " ${aliases[*]} " != *" ${f%%.iso*} "* ]]; then
+                s3 rm "s3://$bucket/$channel/$f"
+                echo "removed $channel/$f (not in $tag)"
+            fi
+        done
+fi
 
 # ---- SHA256SUMS ----------------------------------------------------------------
 
@@ -221,12 +235,10 @@ ISOs are hosted on download.agentuxos.org (GitHub limits release files to 2 GiB)
 |---|---|---|
 | **Plasma Live**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-live-$tag-x86_64") | $(link "agentux-live-$tag-aarch64") |
 | **Plasma Installer**: offline install | $(link "agentux-$tag-x86_64") | $(link "agentux-$tag-aarch64") |
-| **Hyprland Live**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-hyprland-live-$tag-x86_64") | $(link "agentux-hyprland-live-$tag-aarch64") |
-| **Hyprland Installer**: offline install | $(link "agentux-hyprland-$tag-x86_64") | $(link "agentux-hyprland-$tag-aarch64") |
 
 The x86_64 ISOs were booted and their installed systems checked in a VM before this release was published: live ISOs from their live sessions and installer ISOs unattended. The aarch64 ISOs are built natively but not boot-tested: GitHub's arm64 runners have no KVM.
 
-The newest release's ISOs are always at \`$base/iso/stable/\`: \`agentux-live\`, \`agentux\`, \`agentux-hyprland-live\`, and \`agentux-hyprland\`, each with \`x86_64\` and \`aarch64\` variants.
+The newest release's ISOs are always at \`$base/iso/stable/\`: \`agentux-live\` and \`agentux\`, each with \`x86_64\` and \`aarch64\` variants.
 
 Verify a download:
 
@@ -238,7 +250,7 @@ cosign verify-blob --key https://raw.githubusercontent.com/agentux-os/agentux-os
 
 ## Images
 
-This release's images are \`ghcr.io/agentux-os/agentux:$tag\` and \`ghcr.io/agentux-os/agentux-hyprland:$tag\`, and the **stable** channel (\`:stable\`) now points at them. Systems installed from these ISOs follow \`:stable\` and update with \`bootc upgrade\`; to follow the nightly builds instead, \`sudo bootc switch ghcr.io/agentux-os/agentux:latest\`. See the [README](https://github.com/agentux-os/agentux-os#release-channels).
+This release's image is \`ghcr.io/agentux-os/agentux:$tag\`, and the **stable** channel (\`:stable\`) now points at it. Systems installed from these ISOs follow \`:stable\` and update with \`bootc upgrade\`; to follow the nightly builds instead, \`sudo bootc switch ghcr.io/agentux-os/agentux:latest\`. See the [README](https://github.com/agentux-os/agentux-os#release-channels).
 EOF
 if gh release view "$tag" >/dev/null 2>&1; then
     gh release edit "$tag" "${pre[@]}" --verify-tag --title "AgentUX $tag" --notes-file "$notes"
@@ -259,7 +271,7 @@ isos_json=$(
     for name in "${published[@]}"; do
         arch=${name##*-}
         kind=installer; [[ $name == *-live-* ]] && kind=live
-        variant=plasma; [[ $name == agentux-hyprland-* ]] && variant=hyprland
+        variant=plasma
         alias=${name%-"$tag"-"$arch"}-$arch
         jq -n --arg name "$name.iso" --arg url "$base/$versioned/$name.iso" \
             --arg stable_url "$base/$channel/$alias.iso" \
@@ -274,15 +286,13 @@ isos_json=$(
 jq -n --arg version "$tag" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg release "$release_url" --arg sums "$base/$versioned/SHA256SUMS" \
     --arg key "https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub" \
-    --arg plasma "${PLASMA_DIGEST:-}" --arg hyprland "${HYPRLAND_DIGEST:-}" \
+    --arg plasma "${PLASMA_DIGEST:-}" \
     --argjson isos "$isos_json" \
     '{version: $version, date: $date, channel: "stable", release_notes: $release,
       sha256sums: $sums, sha256sums_signature: ($sums + ".sigstore.json"), public_key: $key,
       images: {
         plasma: ({ref: ("ghcr.io/agentux-os/agentux:" + $version), channel: "ghcr.io/agentux-os/agentux:stable"}
-                 + (if $plasma != "" then {digest: $plasma} else {} end)),
-        hyprland: ({ref: ("ghcr.io/agentux-os/agentux-hyprland:" + $version), channel: "ghcr.io/agentux-os/agentux-hyprland:stable"}
-                   + (if $hyprland != "" then {digest: $hyprland} else {} end))
+                 + (if $plasma != "" then {digest: $plasma} else {} end))
       },
       isos: $isos}' >latest.json
 cat latest.json

@@ -2,18 +2,17 @@
 # See ADR 0001 in agentux-os/agentux.
 
 #
-# One Containerfile, three images: VARIANT=plasma (the default) is
-# ghcr.io/agentux-os/agentux; VARIANT=hyprland is
-# ghcr.io/agentux-os/agentux-hyprland, the same system plus a Hyprland
-# session that the login screen preselects (see the Hyprland step below);
-# VARIANT=cosmic is a separate COSMIC-only desktop image.
+# One Containerfile, two images: VARIANT=plasma (the default) is
+# ghcr.io/agentux-os/agentux; VARIANT=cosmic is a separate COSMIC-only
+# desktop image, ghcr.io/agentux-os/agentux-cosmic. (The Hyprland variant,
+# ghcr.io/agentux-os/agentux-hyprland, was retired after v0.5.9.)
 
 ARG FEDORA_VERSION=44
 ARG BASE_IMAGE=quay.io/fedora/fedora-kinoite:${FEDORA_VERSION}
 FROM ${BASE_IMAGE}
 
 ARG VARIANT=plasma
-RUN case "$VARIANT" in plasma|hyprland|cosmic) ;; *) echo "VARIANT must be plasma, hyprland, or cosmic, not '$VARIANT'" >&2; exit 1 ;; esac
+RUN case "$VARIANT" in plasma|cosmic) ;; *) echo "VARIANT must be plasma or cosmic, not '$VARIANT'" >&2; exit 1 ;; esac
 
 # mise is not in the Fedora repos; use its official RPM repository.
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://mise.jdx.dev/rpm/mise.repo -o /etc/yum.repos.d/mise.repo
@@ -98,62 +97,6 @@ RUN arch="$(uname -m)" \
 
 COPY files/ /
 
-# The hyprland variant: Hyprland next to Plasma, as a second session that the
-# login screen preselects. Plasma, the cockpit and everything else are the
-# same as in the default image, so both sessions work and users can pick
-# either at the login screen. Fedora 44 has no hyprland package; the
-# sdegler/hyprland COPR (the one Fedora's Hyprland wiki points to) builds the
-# Hyprland stack for Fedora 44 on x86_64 and aarch64. Its repository is left
-# disabled afterwards, so `rpm-ostree install` on a system never pulls from
-# it unasked. Waybar, fuzzel, mako, foot and the rest come from Fedora. Weak
-# dependencies are off: they would add kitty, wofi, nwg-panel and uwsm, which
-# nothing here uses. variants/hyprland/ holds the session (its Exec seeds ~/.config from
-# /usr/share/agentux/hyprland/user/ when the user has no configuration of
-# their own) and the AgentUX defaults; it is bind-mounted, so the plasma
-# image carries none of it. The build fails if the defaults stop parsing.
-RUN --mount=type=bind,source=variants,target=/tmp/variants \
-    if [ "$VARIANT" != hyprland ]; then exit 0; fi \
-    && copr=/etc/yum.repos.d/_copr_sdegler-hyprland.repo \
-    && fedora="$(rpm -E %fedora)" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/repo/fedora-$fedora/sdegler-hyprland-fedora-$fedora.repo" -o "$copr" \
-    && dnf -y install --setopt=install_weak_deps=False \
-        brightnessctl \
-        cliphist \
-        foot \
-        fuzzel \
-        grim \
-        hypridle \
-        hyprland \
-        hyprland-guiutils \
-        hyprland-qt-support \
-        hyprlock \
-        lxqt-policykit \
-        mako \
-        network-manager-applet \
-        playerctl \
-        slurp \
-        swaybg \
-        waybar \
-        wl-clipboard \
-        xdg-desktop-portal-hyprland \
-    && dnf clean all \
-    && sed -i 's/^enabled=1/enabled=0/' "$copr" \
-    && cp -a /tmp/variants/hyprland/. / \
-    && chmod 0755 /usr/libexec/agentux/hyprland-* /usr/libexec/agentux/waybar-agents \
-    && test -x /usr/bin/start-hyprland \
-    && test -f /usr/share/agentux/hyprland/wallpaper.png \
-    && grep -qx 'Exec=/usr/libexec/agentux/hyprland-session' /usr/share/wayland-sessions/agentux-hyprland.desktop \
-    && runtime="$(mktemp -d)" \
-    && { XDG_RUNTIME_DIR="$runtime" Hyprland --i-am-really-stupid --verify-config \
-        --config /usr/share/agentux/hyprland/user/hypr/hyprland.conf > /tmp/hyprland-verify.txt 2>&1 || true; } \
-    && { grep -qx 'config ok' /tmp/hyprland-verify.txt || { cat /tmp/hyprland-verify.txt >&2; false; }; } \
-    && rm -rf "$runtime" /tmp/hyprland-verify.txt \
-    && foot --check-config --config /usr/share/agentux/hyprland/user/foot/foot.ini \
-    && jq empty /usr/share/agentux/hyprland/user/waybar/config.jsonc \
-    && /usr/libexec/agentux/waybar-agents > /tmp/waybar-agents.json \
-    && jq -e '.class == "offline"' /tmp/waybar-agents.json \
-    && rm /tmp/waybar-agents.json
-
 # Identity: the system calls itself AgentUX, with AgentUX's version, wherever
 # people look (os-release's PRETTY_NAME is what the boot menu entries, the
 # installers' title bars, hostnamectl and KDE's About this System show), the
@@ -207,7 +150,6 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y.%m.%d)}" \
     && set_field VERSION "$date" \
     && set_field PRETTY_NAME "AgentUX $date" \
     && case "$VARIANT" in \
-        hyprland) image=agentux-hyprland variant=Hyprland ;; \
         cosmic) image=agentux-cosmic variant=COSMIC ;; \
         *) image=agentux variant=Plasma ;; \
     esac \
@@ -335,8 +277,9 @@ RUN chmod 0755 /usr/libexec/agentux/grub-theme \
 
 # Updates of this image (bootc upgrade/switch pull through containers/image)
 # must carry a cosign signature from the AgentUX key shipped in files/. Only
-# AgentUX's three repositories get the requirement in every image, so a
-# `bootc switch` between variants is checked too. Fedora's
+# AgentUX's repositories get the requirement in every image, so a `bootc
+# switch` between variants is checked too; agentux-hyprland keeps it after
+# the variant's retirement, as its last images stay in the registry. Fedora's
 # policy for everything else, including its insecureAcceptAnything default,
 # is kept as is. The policy can't check keyless (Fulcio) signatures from
 # GitHub Actions, since it only matches e-mail identities; CI signs both ways

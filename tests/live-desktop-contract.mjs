@@ -14,6 +14,5 @@ function sessionProcesses(imageId) {
 }
 
 assert.deepEqual(sessionProcesses('agentux'), ['kwin_wayland', 'plasmashell']);
-assert.deepEqual(sessionProcesses('agentux-hyprland'), ['Hyprland', 'lxqt-policykit-agent']);
 assert.deepEqual(sessionProcesses('agentux-cosmic'), ['cosmic-session', 'cosmic-comp']);
 console.log('Live desktop variant process contracts passed.');

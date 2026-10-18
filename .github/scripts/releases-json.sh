@@ -48,7 +48,11 @@ mapfile -t tags < <(
 
 for tag in "${tags[@]}"; do
     images='{}'
-    for pair in plasma=agentux hyprland=agentux-hyprland; do
+    pairs=(plasma=agentux)
+    # Hyprland shipped up to v0.5.9; older releases keep listing it, so the
+    # systems still on it can name their version.
+    [[ $(printf '%s\n' "$tag" v0.5.9 | sort -V | head -n1) == "$tag" ]] && pairs+=(hyprland=agentux-hyprland)
+    for pair in "${pairs[@]}"; do
         variant=${pair%%=*}
         repo="ghcr.io/$owner/${pair#*=}"
         if ! raw=$(inspect_raw "$repo:$tag"); then

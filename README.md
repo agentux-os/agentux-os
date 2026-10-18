@@ -41,13 +41,10 @@ This repository publishes the signed container images, installer ISOs and live I
 | Artifact | Current channel |
 |---|---|
 | Plasma image | [`ghcr.io/agentux-os/agentux:stable`](https://github.com/agentux-os/agentux/pkgs/container/agentux) |
-| Hyprland image | [`ghcr.io/agentux-os/agentux-hyprland:stable`](https://github.com/agentux-os/agentux/pkgs/container/agentux-hyprland) |
 | COSMIC image (nightly) | [`ghcr.io/agentux-os/agentux-cosmic:latest`](https://github.com/agentux-os/agentux/pkgs/container/agentux-cosmic) |
 | Live ISO — Plasma | [`agentux-live-x86_64.iso`](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-live-aarch64.iso) |
-| Live ISO — Hyprland | [`agentux-hyprland-live-x86_64.iso`](https://download.agentuxos.org/iso/stable/agentux-hyprland-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-hyprland-live-aarch64.iso) |
 | Live ISO — COSMIC (nightly) | [`agentux-cosmic-live-x86_64.iso`](https://download.agentuxos.org/iso/nightly/agentux-cosmic-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/nightly/agentux-cosmic-live-aarch64.iso) |
 | Installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-aarch64.iso) |
-| Hyprland installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-hyprland-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-hyprland-aarch64.iso) |
 | Release metadata | [`latest.json`](https://download.agentuxos.org/latest.json) · [GitHub releases](https://github.com/agentux-os/agentux-os/releases/latest) |
 
 | Boot | Live desktop | Installer |
@@ -66,13 +63,12 @@ curl -LO https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso.sha25
 sha256sum --check agentux-live-x86_64.iso.sha256
 ```
 
-It boots into the real desktop with a demo of fake agents, and an **Install AgentUX** launcher when you want to keep it ([Try it live](#try-it-live)). The nightly COSMIC live image is a separate download, `agentux-cosmic-live-<arch>.iso`; the stable Plasma and Hyprland live images are linked above. For 64-bit ARM, choose the matching `aarch64` image; for an offline installer, use `agentux-<arch>.iso` ([Install](#install), [Downloads](#downloads)). COSMIC is currently a live-only, nightly variant: the installer ISO workflow supports Plasma and Hyprland.
+It boots into the real desktop with a demo of fake agents, and an **Install AgentUX** launcher when you want to keep it ([Try it live](#try-it-live)). The nightly COSMIC live image is a separate download, `agentux-cosmic-live-<arch>.iso`; the stable Plasma live images are linked above. For 64-bit ARM, choose the matching `aarch64` image; for an offline installer, use `agentux-<arch>.iso` ([Install](#install), [Downloads](#downloads)). COSMIC is currently a live-only, nightly variant: the installer ISO workflow supports Plasma.
 
 **2. Or switch an existing Fedora Atomic / bootc system:**
 
 ```sh
 sudo bootc switch ghcr.io/agentux-os/agentux:stable            # KDE Plasma
-sudo bootc switch ghcr.io/agentux-os/agentux-hyprland:stable   # Hyprland
 sudo bootc switch ghcr.io/agentux-os/agentux-cosmic:latest     # COSMIC nightly
 systemctl reboot
 ```
@@ -84,22 +80,21 @@ Use `:latest` instead of `:stable` for the nightly builds ([Release channels](#r
 ## Contents
 
 - **Use it:** [Variants](#variants) · [Architectures](#architectures) · [Release channels](#release-channels) · [Install](#install) · [Try it live](#try-it-live) · [Downloads](#downloads) · [Verifying the image](#verifying-the-image)
-- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Version](#version) · [Default wallpaper](#default-wallpaper) · [Hyprland](#hyprland) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
+- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Version](#version) · [Default wallpaper](#default-wallpaper) · [Hyprland (retired)](#hyprland-retired) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
 - **Work on it:** [Build and test locally](#build-and-test-locally) · [Boot test](#boot-test) · [Live ISO test](#live-iso-test) · [Installer ISO test](#installer-iso-test) · [How a release reaches `:stable`](#how-a-release-reaches-stable) · [License](#license)
 
 Deep reference detail is folded away in collapsible sections; click a summary to expand it.
 
 ## Variants
 
-The one `Containerfile` builds three images, chosen by the build argument `VARIANT`:
+The one `Containerfile` builds two images, chosen by the build argument `VARIANT`:
 
 | Image | `VARIANT` | Desktop |
 |---|---|---|
 | `ghcr.io/agentux-os/agentux` | `plasma` (default) | KDE Plasma, the AgentUX defaults described below |
-| `ghcr.io/agentux-os/agentux-hyprland` | `hyprland` | The same system plus a Hyprland session, which the login screen preselects; Plasma stays installed and selectable |
 | `ghcr.io/agentux-os/agentux-cosmic` | `cosmic` | Fedora COSMIC Atomic with AgentUX integration; no Plasma session or overlay |
 
-All three are multi-arch, signed and checked against the AgentUX key. Plasma and Hyprland are the stable-release variants; COSMIC is experimental and nightly-only until its install, architecture, signature and rollback gates pass. Switching between Plasma and Hyprland is supported; switching to or from COSMIC is not yet a supported path. See [Hyprland](#hyprland) for what it adds.
+Both are multi-arch, signed and checked against the AgentUX key. Plasma is the stable-release variant; COSMIC is experimental and nightly-only until its install, architecture, signature and rollback gates pass, and switching to or from it is not yet a supported path. The Hyprland variant was retired after v0.5.9 ([Hyprland (retired)](#hyprland-retired)).
 
 ## Architectures
 
@@ -116,7 +111,7 @@ Each image repository has two channels, and an installed system follows exactly 
 | `:latest` | **Nightly** (testing): `main`, rebuilt daily for Fedora's updates | Every day, and on every merge to `main` |
 | `:<YYYYMMDD>` | One nightly build | Never |
 
-Stable and nightly channels exist for Plasma and Hyprland. COSMIC is nightly-only (`:latest`) and receives no `:stable` promotion until its launch gates pass. All three repositories are multi-arch and require the same AgentUX image signature ([Verifying the image](#verifying-the-image)).
+Stable and nightly channels exist for Plasma. COSMIC is nightly-only (`:latest`) and receives no `:stable` promotion until its launch gates pass. Both repositories are multi-arch and require the same AgentUX image signature ([Verifying the image](#verifying-the-image)).
 
 **Which channel a system follows** is the image reference in its origin, shown by `sudo bootc status`, and `bootc upgrade` pulls whatever that tag points at:
 
@@ -131,7 +126,7 @@ sudo bootc switch ghcr.io/agentux-os/agentux:latest   # nightly builds
 systemctl reboot
 ```
 
-(`agentux-hyprland` for the Hyprland variant.) Going from `:latest` to `:stable` usually moves to an older image, since a release is a nightly build from some days or weeks earlier; that is fine on an image-based system, and `sudo bootc rollback` returns to the previous deployment. Until the first release is approved there is no `:stable` (`bootc switch` to it fails with "manifest unknown"), so stay on `:latest` until then; the ISO workflows fall back to `:latest` too if asked for `:stable` before it exists.
+Going from `:latest` to `:stable` usually moves to an older image, since a release is a nightly build from some days or weeks earlier; that is fine on an image-based system, and `sudo bootc rollback` returns to the previous deployment. Until the first release is approved there is no `:stable` (`bootc switch` to it fails with "manifest unknown"), so stay on `:latest` until then; the ISO workflows fall back to `:latest` too if asked for `:stable` before it exists.
 
 ### How a release reaches `:stable`
 
@@ -219,14 +214,14 @@ The same command works on x86_64 and aarch64: the tag is a manifest list and boo
 
 ## Try it live
 
-The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download the newest release from **[download.agentuxos.org/iso/stable/agentux-live-x86_64.iso](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso)** ([`.sha256`](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso.sha256)), a given one from the [releases](https://github.com/agentux-os/agentux-os/releases), or the newest weekly build from `iso/nightly/` (see [Downloads](#downloads)), check it against its `.sha256` (see [Downloads](#downloads)) and write it to a USB stick as above. Each run also keeps its ISO as an artifact for 14 days (`hyprland` builds `agentux-hyprland-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test). It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
+The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download the newest release from **[download.agentuxos.org/iso/stable/agentux-live-x86_64.iso](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso)** ([`.sha256`](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso.sha256)), a given one from the [releases](https://github.com/agentux-os/agentux-os/releases), or the newest weekly build from `iso/nightly/` (see [Downloads](#downloads)), check it against its `.sha256` (see [Downloads](#downloads)) and write it to a USB stick as above. Each run also keeps its ISO as an artifact for 14 days (`cosmic` builds `agentux-cosmic-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test). It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
 
 What you get:
 
-- **The real desktop.** The live system is the published image plus a thin live layer: GRUB's "Try or install AgentUX" entry logs a passwordless `liveuser` straight into Plasma (or the AgentUX Hyprland session on the hyprland ISO) with the AgentUX theme, wallpaper, panel and cockpit, as on an installed system.
+- **The real desktop.** The live system is the published image plus a thin live layer: GRUB's "Try or install AgentUX" entry logs a passwordless `liveuser` straight into Plasma (or COSMIC on the COSMIC ISO) with the AgentUX theme, wallpaper, panel and cockpit, as on an installed system.
 - **A demo with fake agents.** Agent CLIs need vendor logins, so the live session's `agentuxd` runs with `--fake-agents`, a scripted stand-in that answers every agent step. At login it sets up `~/agentux-demo`, a small project whose `agentux.yaml` mirrors the default pipeline (Claude Code plans, OpenCode implements, Codex reviews), and starts two runs: one already approved, which runs through the gate and review to its pull request, and "Add a /health endpoint", which waits in the cockpit's inbox for you to approve its plan. A note on the desktop explains it; `aux ps` and `aux watch <run>` work in a terminal too.
 - **No downloads at login.** On an installed system first login downloads the agent CLIs and Antigravity's ACP server (together over 1 GB); live, they would sit in RAM. The live session does not start `agentux-first-login.service` at login: **Try the agent CLIs in this session**, in the application menu, starts it on demand (into RAM, gone at reboot; the desktop has only **Install AgentUX**, so there is one "Install" icon). `agentux-antigravity-acp.service` never runs live (a drop-in adds `ConditionKernelCommandLine=!rd.live.image`).
-- **Install AgentUX** (desktop, panel and menu) opens Anaconda's web installer, in AgentUX's colours with the mark in its title bar. You pick the language, keyboard and disk; the account is created by the first-boot wizard (plasma-setup) when the installed system starts, as on Fedora Kinoite. It installs the AgentUX image **from the registry** (`agentux-hyprland` from the hyprland ISO), so it needs an internet connection (the launcher checks first and says so; use the installer ISO to install offline): a release ISO installs its release's image by digest, exactly what was tested and released, and leaves the system following `:stable`; a nightly ISO installs `:latest` and follows it (see [Release channels](#release-channels); `live.yml` passes both references to the live layer as `INSTALL_IMAGE` and `TRACK_IMAGE`). The pull goes through the image's own signature policy, so only an image signed with the AgentUX key installs, and the installed system tracks its channel exactly as one installed from the installer ISO (`bootc switch --mutate-in-place --transport registry`, as bootc-image-builder's installer does). Nothing from the live session is installed: it is not the live root that gets copied.
+- **Install AgentUX** (desktop, panel and menu) opens Anaconda's web installer, in AgentUX's colours with the mark in its title bar. You pick the language, keyboard and disk; the account is created by the first-boot wizard (plasma-setup) when the installed system starts, as on Fedora Kinoite. It installs the AgentUX image **from the registry** (`agentux-cosmic` from the COSMIC ISO), so it needs an internet connection (the launcher checks first and says so; use the installer ISO to install offline): a release ISO installs its release's image by digest, exactly what was tested and released, and leaves the system following `:stable`; a nightly ISO installs `:latest` and follows it (see [Release channels](#release-channels); `live.yml` passes both references to the live layer as `INSTALL_IMAGE` and `TRACK_IMAGE`). The pull goes through the image's own signature policy, so only an image signed with the AgentUX key installs, and the installed system tracks its channel exactly as one installed from the installer ISO (`bootc switch --mutate-in-place --transport registry`, as bootc-image-builder's installer does). Nothing from the live session is installed: it is not the live root that gets copied.
 
 <details>
 <summary>How the live ISO is built</summary>
@@ -235,7 +230,7 @@ How it is built: [`live/Containerfile`](live/Containerfile) starts from the publ
 
 - regenerates the initramfs with dracut's `dmsquash-live` (the AgentUX boot splash stays in it), boots with `rd.live.image` and SELinux permissive (the squashfs carries no labels), and mounts a larger tmpfs on `/var/tmp`;
 - adds `livesys-scripts` (the live user, autologin, Fedora's live tweaks), `anaconda-live` with an AgentUX profile and the payload in `/usr/share/agentux/live/install.ks`, and `qemu-guest-agent`;
-- brands the web installer: anaconda-webui runs in Cockpit, which takes its logo and colours from `/usr/share/cockpit/branding/<ID>-<VARIANT_ID>/` before `branding/fedora/`, so [`live/cockpit-branding/`](live/cockpit-branding/) goes there (`fedora-agentux` or `fedora-agentux-hyprland`): the compact mark in Lime, an Ink title bar instead of Fedora's blue, Lime buttons on the dark theme and Moss on the light one. The product name in the title bar is os-release's `PRETTY_NAME`, already AgentUX's;
+- brands the web installer: anaconda-webui runs in Cockpit, which takes its logo and colours from `/usr/share/cockpit/branding/<ID>-<VARIANT_ID>/` before `branding/fedora/`, so [`live/cockpit-branding/`](live/cockpit-branding/) goes there (`fedora-agentux` or `fedora-agentux-cosmic`): the compact mark in Lime, an Ink title bar instead of Fedora's blue, Lime buttons on the dark theme and Moss on the light one. The product name in the title bar is os-release's `PRETTY_NAME`, already AgentUX's;
 - replaces Fedora's "Install to Hard Drive" with **Install AgentUX** (the only desktop icon), adds **Try the agent CLIs in this session** to the application menu, pins Install AgentUX first in the panel and adds the desktop note;
 - runs `agentuxd` with `--fake-agents` (a drop-in on its user unit) and enables `agentux-live-demo.service`;
 - disables `agentux-first-login.service` and `agentux-antigravity-acp.service` for all users.
@@ -251,7 +246,6 @@ ISOs are published on **download.agentuxos.org**, a Cloudflare R2 bucket: GitHub
 | Path | What | Installs and follows |
 |---|---|---|
 | `iso/stable/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest Plasma release | `:stable` |
-| `iso/stable/agentux-hyprland-live-x86_64.iso`, `agentux-hyprland-x86_64.iso`, `…-aarch64.iso` | The newest Hyprland release | `:stable` |
 | `iso/v<version>/…-v<version>-<arch>.iso` | Every release, kept; its [GitHub release](https://github.com/agentux-os/agentux-os/releases) carries the checksums and the links | `:stable` |
 | `iso/nightly/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest Plasma weekly build, or a run dispatched with **publish** from `main`; replaced each time | `:latest` |
 | `iso/nightly/agentux-cosmic-live-x86_64.iso`, `…-aarch64.iso` | COSMIC live ISO from a run dispatched with **publish** from `main`; replaced each time | `ghcr.io/agentux-os/agentux-cosmic:latest` |
@@ -289,8 +283,7 @@ sha256sum --check --ignore-missing SHA256SUMS
   "sha256sums_signature": "https://download.agentuxos.org/iso/v0.5.5/SHA256SUMS.sigstore.json",
   "public_key": "https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub",
   "images": {
-    "plasma": {"ref": "ghcr.io/agentux-os/agentux:v0.5.5", "channel": "ghcr.io/agentux-os/agentux:stable", "digest": "sha256:..."},
-    "hyprland": {"ref": "ghcr.io/agentux-os/agentux-hyprland:v0.5.5", "channel": "ghcr.io/agentux-os/agentux-hyprland:stable", "digest": "sha256:..."}
+    "plasma": {"ref": "ghcr.io/agentux-os/agentux:v0.5.5", "channel": "ghcr.io/agentux-os/agentux:stable", "digest": "sha256:..."}
   },
   "isos": [
     {
@@ -348,7 +341,7 @@ cosign verify --key files/etc/pki/containers/agentux-os.pub "ghcr.io/agentux-os/
 
 An installed system checks the key signature itself on every `bootc upgrade` and `bootc switch`, because the image ships:
 
-- `/etc/containers/policy.json` adds three entries to Fedora's, in every image: `ghcr.io/agentux-os/agentux`, `ghcr.io/agentux-os/agentux-hyprland` and `ghcr.io/agentux-os/agentux-cosmic` each require a `sigstoreSigned` signature by `/etc/pki/containers/agentux-os.pub` (identity `matchRepository`, since cosign signs repositories, not tags). Every other registry keeps Fedora's rules, including the `insecureAcceptAnything` default.
+- `/etc/containers/policy.json` adds three entries to Fedora's, in every image: `ghcr.io/agentux-os/agentux`, `ghcr.io/agentux-os/agentux-cosmic` and the retired `ghcr.io/agentux-os/agentux-hyprland` each require a `sigstoreSigned` signature by `/etc/pki/containers/agentux-os.pub` (identity `matchRepository`, since cosign signs repositories, not tags). Every other registry keeps Fedora's rules, including the `insecureAcceptAnything` default.
 - `/etc/containers/registries.d/agentux-os.yaml`, which turns on `use-sigstore-attachments` for `ghcr.io/agentux-os` so the signature is fetched from the registry.
 
 An update that is unsigned or signed by another key is refused before any layer is downloaded, and the system stays on what it runs. The policy checks the key signature, not the keyless one: containers/image only matches Fulcio certificates by e-mail, and GitHub Actions certificates carry a workflow URI.
@@ -364,9 +357,9 @@ and add it by hand if it is not. Do not use `bootc switch --enforce-container-si
 <details>
 <summary>How CI checks the signatures, and where the key lives</summary>
 
-CI checks the policy the same way a system would: after signing, it runs the image's own `skopeo` with the image's own policy, registries.d and key ([`tests/sigpolicy.sh`](tests/sigpolicy.sh)), once per architecture (`skopeo --override-arch`, so it picks that architecture's image from the list as a system of that architecture would), against the signed list's digest and tag, which must pass, against an unsigned image pushed to `:ci-unsigned` in the same repository, which must be refused for lack of a signature, and against an image from another registry, which must still pass; it also checks that the policy requires the AgentUX key for both repositories. This runs for each variant's repository (`publish (plasma, agentux)`, `publish (hyprland, agentux-hyprland)`). If any of that fails, neither `:latest` nor the dated tag moves: each architecture's image is pushed first under a staging tag (`ci-staging-amd64`, `ci-staging-arm64`), the list under `ci-staging`, and the public tags are copied from the list's digest, unchanged, only after every check passed. To try the publishing path from a branch, run `gh workflow run build.yml --ref <branch>`: it pushes, signs and checks `test-<sha>` (the list) and `test-<sha>-amd64` / `test-<sha>-arm64` only. A `v*` tag (through `release.yml`) does the same with `candidate-<tag>`, and only the approved release job moves `:<tag>` and `:stable` to it.
+CI checks the policy the same way a system would: after signing, it runs the image's own `skopeo` with the image's own policy, registries.d and key ([`tests/sigpolicy.sh`](tests/sigpolicy.sh)), once per architecture (`skopeo --override-arch`, so it picks that architecture's image from the list as a system of that architecture would), against the signed list's digest and tag, which must pass, against an unsigned image pushed to `:ci-unsigned` in the same repository, which must be refused for lack of a signature, and against an image from another registry, which must still pass; it also checks that the policy requires the AgentUX key for both repositories. This runs for each variant's repository (`publish (plasma, agentux)`, `publish (cosmic, agentux-cosmic)`). If any of that fails, neither `:latest` nor the dated tag moves: each architecture's image is pushed first under a staging tag (`ci-staging-amd64`, `ci-staging-arm64`), the list under `ci-staging`, and the public tags are copied from the list's digest, unchanged, only after every check passed. To try the publishing path from a branch, run `gh workflow run build.yml --ref <branch>`: it pushes, signs and checks `test-<sha>` (the list) and `test-<sha>-amd64` / `test-<sha>-arm64` only. A `v*` tag (through `release.yml`) does the same with `candidate-<tag>`, and only the approved release job moves `:<tag>` and `:stable` to it.
 
-The required check, `build`, passes when both variants built for both architectures and, outside pull requests, both lists were published; the per-image jobs are `image (plasma, amd64)`, `image (plasma, arm64)`, `image (hyprland, amd64)` and `image (hyprland, arm64)`, and the smoke tests `smoke (<variant>, <arch>)`.
+The required check, `build`, passes when both variants built for both architectures and, outside pull requests, both lists were published; the per-image jobs are `image (plasma, amd64)`, `image (plasma, arm64)`, `image (cosmic, amd64)` and `image (cosmic, arm64)`, and the smoke tests `smoke (<variant>, <arch>)`.
 
 Every job that builds or pulls an image first pulls it with [`.github/scripts/pull.sh`](.github/scripts/pull.sh), which retries up to five times with a growing pause: quay.io's CDN drops a blob download halfway now and then (`writing blob: ... unexpected EOF`), and podman's own few quick retries used to give up and fail the whole build. `podman build` then starts from the local copy of the base image.
 
@@ -440,19 +433,13 @@ Since the symlink belongs to `desktop-backgrounds-kde`, `rpm -V desktop-backgrou
 
 </details>
 
-## Hyprland
+## Hyprland (retired)
 
-`ghcr.io/agentux-os/agentux-hyprland` is Kinoite with everything above, plus [Hyprland](https://hypr.land) as a second session, **AgentUX Hyprland**, preselected on the login screen. It is built on Kinoite rather than a minimal Fedora base on purpose: everything AgentUX ships (the cockpit, the Plasma overlay, plasma-setup's first-boot wizard, the login screen, the boot test) keeps working unchanged, KDE apps and settings are there when needed, and Plasma is one click away on the login screen. The cost is size (the KDE stack stays in the image) and two desktops in one system.
+Up to v0.5.9 AgentUX also shipped `ghcr.io/agentux-os/agentux-hyprland`: the Plasma image plus a Hyprland session. It is no longer built or released; its last images stay in the registry, signed, and every AgentUX image keeps requiring the AgentUX signature for that repository. A system installed from it keeps working but gets no updates; move it to the Plasma image, which keeps the user's home and settings:
 
-- **Packages:** Hyprland, hyprlock, hypridle, hyprpolkitagent, xdg-desktop-portal-hyprland and hyprland-qt-support from the [sdegler/hyprland](https://copr.fedorainfracloud.org/coprs/sdegler/hyprland/) COPR (Fedora 44 has no Hyprland package; the COPR builds for x86_64 and aarch64; its repository file is left disabled in the image); Waybar, fuzzel (launcher), mako (notifications), foot (terminal), swaybg, cliphist, grim/slurp and nm-applet from Fedora.
-- **Session:** `/usr/share/wayland-sessions/agentux-hyprland.desktop` runs `/usr/libexec/agentux/hyprland-session`, which seeds the configuration (below) and starts `start-hyprland`. `/usr/lib/plasmalogin/plasmalogin.conf.d/60-agentux-hyprland.conf` preselects it (`[Greeter] PreselectedSession`), which wins over the last session used; to default to Plasma again, choose it under System Settings > Login Screen.
-- **Configuration:** Hyprland and its tools read only `~/.config`, so the session copies every file under `/usr/share/agentux/hyprland/user/` to the same path in `~/.config` when the user does not have it yet (and replaces a `hyprland.conf` that Hyprland generated itself). `~/.config/hypr/hyprland.conf` is a stub that `source`s `/usr/share/agentux/hyprland/hyprland.conf`, so the defaults follow image updates and anything the user adds below the `source` line wins; `hyprlock.conf`, `hypridle.conf`, Waybar's `config.jsonc` and `style.css`, mako's, fuzzel's and foot's configs are full copies the user owns. All in the AgentUX colours (Lime on Ink), with the brand wallpaper (`/usr/share/agentux/hyprland/wallpaper.png`, rendered at 3840 × 2160 from `brand/art/wallpaper-dark.svg` in the agentux repository; the Plasma overlay's wallpaper is an SVG, which hyprlock cannot load).
-- **Layout:** the master layout, tuned for watching several agents: the cockpit, opened at login, holds the large master area on the left and every new window (agent terminals, logs) stacks on the right.
-- **Keys:** `Super+A` focuses the cockpit (or opens it), `Super+Return` a terminal (foot), `Super+Space` / `Super+D` the launcher, `Super+Q` closes, `Super+F` fullscreen, `Super+V` float, `Super+M` swaps the focused window into the master area, `Super+O` moves the master area (left, top, right, centre), `Super+[` / `Super+]` resize it, `Super+arrows` / `Super+H/J/K/L` focus (with `Shift`, move), `Super+1`…`0` workspaces (with `Shift`, move the window), `Super+Shift+V` clipboard history, `Super+Escape` lock, `Print` screenshot of a region to the clipboard, `Super+Shift+E` log out.
-- **Agents in the bar:** Waybar's `custom/agents` module, next to the AgentUX button, runs `/usr/libexec/agentux/waybar-agents` every 5 seconds (or on `pkill -RTMIN+8 waybar`). It reads `aux ps --json` from the user's `agentuxd` and shows `agents N` (active runs), `agents N · M waiting` on Lime when approvals or agents' questions wait for you, and `agents off` when the daemon is not reachable; the tooltip lists the runs and the requests, and a click opens the cockpit. The JSON form is stable (agentux-core `docs/api.md`, "aux ps --json"); the script says `agents ?` if aux fails in any other way. The smoke test runs it with no daemon and against `aux daemon --fake-agents` with a run waiting for plan approval.
-- **Idle:** hypridle locks with hyprlock after 10 minutes and before suspend, and turns screens off after 15.
-
-The build fails if the defaults stop parsing (`Hyprland --verify-config`, `foot --check-config`, `jq` on Waybar's config); the smoke test runs the same checks on a fresh user's seeded `~/.config`. The boot test covers the Plasma image only.
+```sh
+sudo bootc switch ghcr.io/agentux-os/agentux:stable
+```
 
 ## AgentUX versions
 
@@ -466,7 +453,7 @@ The AgentUX components are installed from their GitHub releases, pinned in one p
 | `AGENTUX_PLASMA_SHA256` | SHA-256 pin for `agentux-desktop-plasma-<version>.tar.gz` |
 | `AGENTUX_COSMIC_SHA256` | SHA-256 pin for `agentux-desktop-cosmic-<version>.tar.gz` |
 
-`<arch>` is the build's `uname -m`, `x86_64` or `aarch64`; any other architecture fails the build. Each variant installs the common archive first, verifies it against its pinned SHA-256, and extracts exactly one desktop bundle: Plasma for the Plasma and Hyprland images, COSMIC for the COSMIC image. The archives contain only `usr/` and `etc/`; configuration is baked into the immutable image rather than layered as runtime RPMs. `just bump-agentux` (needs an authenticated `gh`) checks both architecture RPMs and all three archives plus their checksum sidecars before updating any pin, and leaves `Containerfile` unchanged if a required release asset is missing or malformed. If a release ever changes the RPM's release number or Fedora tag (`-1.fc44`), update the file name in the `Containerfile` by hand.
+`<arch>` is the build's `uname -m`, `x86_64` or `aarch64`; any other architecture fails the build. Each variant installs the common archive first, verifies it against its pinned SHA-256, and extracts exactly one desktop bundle: Plasma for the Plasma image, COSMIC for the COSMIC image. The archives contain only `usr/` and `etc/`; configuration is baked into the immutable image rather than layered as runtime RPMs. `just bump-agentux` (needs an authenticated `gh`) checks both architecture RPMs and all three archives plus their checksum sidecars before updating any pin, and leaves `Containerfile` unchanged if a required release asset is missing or malformed. If a release ever changes the RPM's release number or Fedora tag (`-1.fc44`), update the file name in the `Containerfile` by hand.
 
 ## Boot splash
 
@@ -517,7 +504,7 @@ The live ISO's menu is Titanoboa's: it generates the ISO's `grub.cfg` from the e
 You need Linux with Podman and [`just`](https://just.systems); `vm` also needs QEMU with KVM and OVMF.
 
 ```sh
-just build        # podman build -> localhost/agentux:dev (just build hyprland for the Hyprland variant)
+just build        # podman build -> localhost/agentux:dev (just build cosmic for the COSMIC variant)
 just iso          # installer ISO from that image -> output/bootiso/install.iso (uses sudo)
 just vm           # install the ISO into a VM disk, output/vm-disk.qcow2
 just vm disk      # boot the installed VM disk
@@ -565,7 +552,7 @@ Locally, `just boot-test` does the same with the image from `just build` (result
 
 The Live ISO workflow boots the amd64 ISO it built (on pull requests that touch `live/`, the live test or the workflow, weekly, and for every release) headless in QEMU/KVM with UEFI, from the CD, with an empty disk behind it, and again in a second job with legacy BIOS (QEMU's SeaBIOS, `LIVE_TEST_FIRMWARE=bios`): first as a USB stick written with `dd` up to the live session, then the whole test below from the CD, the install on a BIOS machine (the installed disk must have a BIOS boot partition and GRUB in its MBR) and the installed disk's first boot with BIOS, and talks to the live system through the QEMU guest agent the live layer ships ([`tests/live-vm.sh`](tests/live-vm.sh), which runs [`tests/live.sh`](tests/live.sh) in the VM as root):
 
-- it waits for the live user's autologin session, then checks the selected desktop (`kwin_wayland` + `plasmashell`, `Hyprland` + its polkit agent, or COSMIC), `agentux-cockpit`, AgentUX look-and-feel where applicable, `agentuxd` with `--fake-agents`, and `aux ps` with the demo's runs (one waiting for approval); it also checks that neither first-login nor the Antigravity ACP server unit is enabled or ran. The installer launchers, panel pin and Anaconda payload are checked too; opening Anaconda from Hyprland is required, while the other variants warn;
+- it waits for the live user's autologin session, then checks the selected desktop (`kwin_wayland` + `plasmashell`, or COSMIC), `agentux-cockpit`, AgentUX look-and-feel where applicable, `agentuxd` with `--fake-agents`, and `aux ps` with the demo's runs (one waiting for approval); it also checks that neither first-login nor the Antigravity ACP server unit is enabled or ran. The installer launchers, panel pin and Anaconda payload are checked too; a launcher that does not open Anaconda only warns;
 - screenshots: the desktop after login and a minute later, the demo after the test approves its waiting run, and the installer opened through **Install AgentUX**; plus a screendump every 2 seconds of the first two minutes (GRUB and the boot splash, `boot/` in the artifact);
 - then it installs from the live system to the VM's disk with Anaconda and the live installer's own payload (`install.ks`: the registry pull through the signature policy and the `bootc switch`). Anaconda's live mode takes no kickstart (its interactive defaults only preset values; the disk is always picked in the UI), so the test runs it as a plain kickstart install from the live session, with the answers the UI would get. Anaconda halts the live system at the end, so the test then attaches the VM's disk to the host (`qemu-nbd`) and checks the installed deployment there: it tracks the ISO's channel from the registry (`ghcr.io/agentux-os/agentux:latest`, or `:stable` for a release; `ostree-unverified-registry:`, as after a bootc-image-builder install), has the signature policy and the image's own user units, and no live user, live demo or fake-agents override. Then it boots the disk alone and screenshots its first boot. The install depends on the VM reaching ghcr.io, so a failed install only warns; an installed system that differs from a normal install fails the job. The VM gets 12 GB of RAM for it, since the live system runs in RAM.
 

@@ -101,7 +101,7 @@ _boot-config:
 
 # Run shellcheck on the scripts and hadolint on the Containerfile
 lint:
-    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh variants/hyprland/usr/libexec/agentux/* .github/scripts/*.sh scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
+    shellcheck files/usr/libexec/agentux/* files/etc/profile.d/agentux.sh tests/*.sh .github/scripts/*.sh scripts/*.sh live/build.sh live/files/usr/libexec/agentux/*
     shellcheck --shell=sh live/livesys-session-extra
     podman run --rm -v "$PWD:/src:ro,z" -w /src {{ hadolint }} hadolint Containerfile live/Containerfile
 

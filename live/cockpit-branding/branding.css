@@ -1,7 +1,7 @@
 /* AgentUX branding for Cockpit pages on the live ISO, which means the web
  * installer (anaconda-webui runs in Cockpit). live/build.sh installs this
  * directory as /usr/share/cockpit/branding/<ID>-<VARIANT_ID>/ (fedora-agentux,
- * fedora-agentux-hyprland), which Cockpit prefers over branding/fedora/ for
+ * fedora-agentux-cosmic), which Cockpit prefers over branding/fedora/ for
  * every file it has. The installer loads this file after its own CSS, so
  * rules with the same selectors win. Colours: the brand's (agentux
  * brand/README.md); logo.png is the compact mark in Lime, apple-touch-icon.png
