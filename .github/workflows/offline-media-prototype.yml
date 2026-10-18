@@ -215,7 +215,8 @@ jobs:
             -v /dev:/dev -v /run/udev:/run/udev:ro -v "$archive:/run/agentux-source.oci.tar:ro" \
             "$loaded" bootc install to-disk \
               --source-imgref=oci-archive:/run/agentux-source.oci.tar \
-              --target-imgref=ghcr.io/agentux-os/agentux:stable --skip-fetch-check \n              --filesystem btrfs --wipe /dev/nbd0
+              --target-imgref=ghcr.io/agentux-os/agentux:stable --skip-fetch-check \
+              --filesystem btrfs --wipe /dev/nbd0
           sudo partprobe /dev/nbd0 || true
           sudo udevadm settle --timeout=30 || true
           lsblk -f /dev/nbd0
