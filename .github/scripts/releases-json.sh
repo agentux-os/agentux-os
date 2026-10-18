@@ -44,7 +44,14 @@ mapfile -t tags < <(
         | jq -r '.Tags[] | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+([-.+][0-9A-Za-z.-]+)?$"))' \
         | sort -rV
 )
-(( ${#tags[@]} > 0 )) || { echo "::error::no v* tags in ghcr.io/$owner/agentux"; exit 1; }
+# No release yet (the first one, or after the old ones were removed): an
+# empty list. A release always has its own tag here, as publish-iso.sh runs
+# this after the promotion.
+if (( ${#tags[@]} == 0 )); then
+    echo "::notice::no v* tags in ghcr.io/$owner/agentux yet; writing an empty release list"
+    jq -n --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schema: 1, updated: $date, releases: []}' >"$out"
+    exit 0
+fi
 
 for tag in "${tags[@]}"; do
     images='{}'
