@@ -130,7 +130,7 @@ jobs:
           # sha256, so verifying the catalog and then the selected payload
           # against it covers the payload without a 4 GiB signature check.
           cosign sign-blob --yes --key "$RUNNER_TEMP/offline-prototype/signing/cosign.key" \
-            --bundle "$catalog.sigstore.json" --tlog-upload=false "$catalog" >/dev/null
+            --bundle "$catalog.sigstore.json" --tlog-upload=false --use-signing-config=false "$catalog" >/dev/null
           cosign verify-blob --key "$RUNNER_TEMP/offline-prototype/signing/cosign.pub" \
             --bundle "$catalog.sigstore.json" --insecure-ignore-tlog "$catalog" >/dev/null
           node installer/offline-prototype/catalog.mjs verify "$payload_dir" "$ARCH" "$catalog"
