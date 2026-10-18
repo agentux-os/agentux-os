@@ -1,0 +1,45 @@
+# bootc-image-builder config for the COSMIC installer ISO (iso.yml picks it
+# for the cosmic variant). The same as iso.toml, plus `firstboot --enable`:
+# COSMIC has no plasma-setup, so Fedora's Initial Setup creates the account
+# at first boot, as after an install from the COSMIC live ISO
+# (live/install.ks).
+#
+# Without a kickstart, an anaconda-iso installs unattended to the first disk
+# it finds. A kickstart that sets only the UI mode makes the install
+# interactive instead: the user picks the disk, language, time zone and
+# creates their account. bootc-image-builder adds the `ostreecontainer`
+# command that installs the AgentUX image (embedded in the ISO, so the
+# install works offline) and a %post `bootc switch` that makes the installed
+# system follow the image reference it was given. That reference is the
+# channel: iso.yml tags the image it builds from as
+# ghcr.io/agentux-os/agentux:stable for a release (the tag's digest) or
+# leaves it :latest for a nightly build, and passes that name (see
+# .github/scripts/channel.sh). This file has no setting for it: bootc-image-
+# builder takes the target only from the image name.
+[customizations.installer.kickstart]
+contents = """
+graphical
+firstboot --enable
+
+# Anaconda writes the root file system into /etc/fstab (btrfs, with
+# subvol=root and its mount options). On a bootc system / is a composefs
+# overlay that the initramfs mounts from the kernel command line (root=,
+# rootflags=), so systemd-remount-fs fails at every boot trying to apply
+# those options to it ("overlay: No changes allowed in reconfigure") and the
+# system starts degraded. bootc's own installer writes no such line; this
+# comments it out. The other entries (/boot, /boot/efi) stay.
+%post --erroronfail
+if [ -f /etc/fstab ]; then
+    awk '$2 == "/" && $1 !~ /^#/ {print "# " $0 "    # disabled by the AgentUX installer: ostree mounts /"; next} {print}' \
+        /etc/fstab >/etc/fstab.agentux
+    cat /etc/fstab.agentux >/etc/fstab
+    rm -f /etc/fstab.agentux
+fi
+%end
+"""
+
+[customizations.installer.modules]
+enable = [
+  "org.fedoraproject.Anaconda.Modules.Localization",
+  "org.fedoraproject.Anaconda.Modules.Timezone",
+]

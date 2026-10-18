@@ -4,19 +4,21 @@
 #
 # usage: publish-iso.sh nightly|release DIR
 #   DIR holds the ISOs to publish, each <name>.iso with its <name>.iso.sha256,
-#   as the ISO jobs uploaded them (<prefix>-<version>-<arch>, e.g.
-#   agentux-live-v0.5.0-x86_64 or agentux-20261014-x86_64).
+#   as the ISO jobs uploaded them: agentux-<desktop>-<kind>-<version>-<arch>,
+#   desktop plasma or cosmic, kind live or installer, version a v* tag or a
+#   date (e.g. agentux-plasma-live-v0.6.0-x86_64,
+#   agentux-cosmic-installer-20261020-aarch64).
 #
 #   nightly  the weekly build or a dispatch with publish set (iso.yml,
 #            live.yml): each ISO replaces its channel copy in iso/nightly/
-#            under its name without the date (agentux-live-x86_64.iso).
+#            under its name without the date (agentux-plasma-live-x86_64.iso).
 #   release  a v* tag, from release.yml once the owner approved it: each ISO
 #            goes to iso/<tag>/ under its own name, and its copy replaces the
-#            one in iso/stable/ (agentux-live-x86_64.iso); then the GitHub
+#            one in iso/stable/ (agentux-plasma-live-x86_64.iso); then the GitHub
 #            release is created with the checksums and the links, and
 #            latest.json moves to the release. EXPECT lists the ISO names
-#            (without .iso) the release must have; PLASMA_DIGEST
-#            (optional) is the promoted image's digest,
+#            (without .iso) the release must have; PLASMA_DIGEST and
+#            COSMIC_DIGEST (optional) are the promoted images' digests,
 #            for latest.json.
 #
 # Layout of the bucket:
@@ -231,26 +233,30 @@ cat >>"$notes" <<EOF
 
 ISOs are hosted on download.agentuxos.org (GitHub limits release files to 2 GiB). Each has a \`.sha256\` checksum, attached here and next to the ISO, signed with the AgentUX key.
 
-| Variant / ISO | x86_64 | aarch64 |
+| Desktop / ISO | x86_64 | aarch64 |
 |---|---|---|
-| **Plasma Live**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-live-$tag-x86_64") | $(link "agentux-live-$tag-aarch64") |
-| **Plasma Installer**: offline install | $(link "agentux-$tag-x86_64") | $(link "agentux-$tag-aarch64") |
+| **KDE Plasma — Live**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-plasma-live-$tag-x86_64") | $(link "agentux-plasma-live-$tag-aarch64") |
+| **KDE Plasma — Installer**: install offline | $(link "agentux-plasma-installer-$tag-x86_64") | $(link "agentux-plasma-installer-$tag-aarch64") |
+| **COSMIC — Live**: try AgentUX without installing, then install it (needs internet) | $(link "agentux-cosmic-live-$tag-x86_64") | $(link "agentux-cosmic-live-$tag-aarch64") |
+| **COSMIC — Installer**: install offline | $(link "agentux-cosmic-installer-$tag-x86_64") | $(link "agentux-cosmic-installer-$tag-aarch64") |
+
+Every name says what it is: \`agentux-<desktop>-<live|installer>-<version>-<arch>.iso\`.
 
 The x86_64 ISOs were booted and their installed systems checked in a VM before this release was published: live ISOs from their live sessions and installer ISOs unattended. The aarch64 ISOs are built natively but not boot-tested: GitHub's arm64 runners have no KVM.
 
-The newest release's ISOs are always at \`$base/iso/stable/\`: \`agentux-live\` and \`agentux\`, each with \`x86_64\` and \`aarch64\` variants.
+The newest release's ISOs are always at \`$base/iso/stable/\`: the same names without the version (\`agentux-plasma-live-x86_64.iso\`, \`agentux-cosmic-installer-aarch64.iso\`, …).
 
 Verify a download:
 
 \`\`\`sh
-sha256sum --check agentux-live-$tag-x86_64.iso.sha256
+sha256sum --check agentux-plasma-live-$tag-x86_64.iso.sha256
 cosign verify-blob --key https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub \\
-  --bundle agentux-live-$tag-x86_64.iso.sha256.sigstore.json agentux-live-$tag-x86_64.iso.sha256
+  --bundle agentux-plasma-live-$tag-x86_64.iso.sha256.sigstore.json agentux-plasma-live-$tag-x86_64.iso.sha256
 \`\`\`
 
 ## Images
 
-This release's image is \`ghcr.io/agentux-os/agentux:$tag\`, and the **stable** channel (\`:stable\`) now points at it. Systems installed from these ISOs follow \`:stable\` and update with \`bootc upgrade\`; to follow the nightly builds instead, \`sudo bootc switch ghcr.io/agentux-os/agentux:latest\`. See the [README](https://github.com/agentux-os/agentux-os#release-channels).
+This release's images are \`ghcr.io/agentux-os/agentux:$tag\` (KDE Plasma) and \`ghcr.io/agentux-os/agentux-cosmic:$tag\` (COSMIC), and each one's **stable** channel (\`:stable\`) now points at it. Systems installed from these ISOs follow \`:stable\` and update with \`bootc upgrade\`; to follow the nightly builds instead, \`sudo bootc switch ghcr.io/agentux-os/agentux:latest\` (\`agentux-cosmic:latest\` for COSMIC). See the [README](https://github.com/agentux-os/agentux-os#release-channels).
 EOF
 if gh release view "$tag" >/dev/null 2>&1; then
     gh release edit "$tag" "${pre[@]}" --verify-tag --title "AgentUX $tag" --notes-file "$notes"
@@ -271,7 +277,7 @@ isos_json=$(
     for name in "${published[@]}"; do
         arch=${name##*-}
         kind=installer; [[ $name == *-live-* ]] && kind=live
-        variant=plasma
+        variant=plasma; [[ $name == agentux-cosmic-* ]] && variant=cosmic
         alias=${name%-"$tag"-"$arch"}-$arch
         jq -n --arg name "$name.iso" --arg url "$base/$versioned/$name.iso" \
             --arg stable_url "$base/$channel/$alias.iso" \
@@ -286,13 +292,15 @@ isos_json=$(
 jq -n --arg version "$tag" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --arg release "$release_url" --arg sums "$base/$versioned/SHA256SUMS" \
     --arg key "https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub" \
-    --arg plasma "${PLASMA_DIGEST:-}" \
+    --arg plasma "${PLASMA_DIGEST:-}" --arg cosmic "${COSMIC_DIGEST:-}" \
     --argjson isos "$isos_json" \
     '{version: $version, date: $date, channel: "stable", release_notes: $release,
       sha256sums: $sums, sha256sums_signature: ($sums + ".sigstore.json"), public_key: $key,
       images: {
         plasma: ({ref: ("ghcr.io/agentux-os/agentux:" + $version), channel: "ghcr.io/agentux-os/agentux:stable"}
-                 + (if $plasma != "" then {digest: $plasma} else {} end))
+                 + (if $plasma != "" then {digest: $plasma} else {} end)),
+        cosmic: ({ref: ("ghcr.io/agentux-os/agentux-cosmic:" + $version), channel: "ghcr.io/agentux-os/agentux-cosmic:stable"}
+                 + (if $cosmic != "" then {digest: $cosmic} else {} end))
       },
       isos: $isos}' >latest.json
 cat latest.json

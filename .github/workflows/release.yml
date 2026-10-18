@@ -7,15 +7,16 @@ name: Release
 # not a fresh build that would pull newer Fedora packages.
 #
 #   1. candidate the tag must be on main and main must have published
-#                sha-<commit> for it; resolve its image to its digest
-#                once and check its signatures (the AgentUX key and
-#                keyless).
-#   2. boot      boot.yml boots that plasma digest in QEMU/KVM and runs
+#                sha-<commit> for it; resolve both images (Plasma and
+#                COSMIC) to their digests once and check their signatures
+#                (the AgentUX key and keyless).
+#   2. boot      boot.yml boots the plasma digest in QEMU/KVM and runs
 #                tests/boot.sh on it.
-#      iso, live the installer and live ISOs (Plasma, x86_64 and
-#                aarch64), built from the plasma digest and following
-#                :stable; x86_64 ISOs are installed in a VM. COSMIC remains
-#                nightly-only. ISOs are only built here.
+#      iso, live the installer and live ISOs of each desktop (x86_64 and
+#                aarch64), agentux-<desktop>-<installer|live>-<tag>-<arch>,
+#                built from that desktop's digest and following its
+#                :stable; x86_64 ISOs are installed in a VM. ISOs are only
+#                built here.
 #   3. release   waits for the owner's approval (the `release` environment:
 #                v* tags only, wendelmax as required reviewer), then moves
 #                :<tag> and :stable to the digests, publishes the ISOs in
@@ -45,6 +46,7 @@ jobs:
       packages: read
     outputs:
       plasma: ${{ steps.digests.outputs.plasma }}
+      cosmic: ${{ steps.digests.outputs.cosmic }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,7 +73,7 @@ jobs:
         run: |
           echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           tag="sha-${GITHUB_SHA::12}"
-          for pair in plasma=agentux; do
+          for pair in plasma=agentux cosmic=agentux-cosmic; do
             repo="ghcr.io/$OWNER/${pair#*=}"
             if ! raw="$(skopeo inspect --raw --creds "${{ github.actor }}:$TOKEN" "docker://$repo:$tag")"; then
               echo "::error::$repo:$tag does not exist: main has not published an image for $GITHUB_SHA (wait for its Build image run, or tag a commit that has one)"
@@ -110,6 +112,19 @@ jobs:
       channel: stable
     secrets: inherit
 
+  iso-cosmic:
+    needs: candidate
+    uses: ./.github/workflows/iso.yml
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    with:
+      variant: cosmic
+      image: ghcr.io/${{ github.repository_owner }}/agentux-cosmic@${{ needs.candidate.outputs.cosmic }}
+      channel: stable
+    secrets: inherit
+
   live-plasma:
     needs: candidate
     uses: ./.github/workflows/live.yml
@@ -124,11 +139,25 @@ jobs:
       channel: stable
     secrets: inherit
 
+  live-cosmic:
+    needs: candidate
+    uses: ./.github/workflows/live.yml
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    with:
+      variant: cosmic
+      arch: both
+      image: ghcr.io/${{ github.repository_owner }}/agentux-cosmic@${{ needs.candidate.outputs.cosmic }}
+      channel: stable
+    secrets: inherit
+
   # The gate: this job waits for the owner's approval in the `release`
   # environment. Its R2 credentials (and a copy of the signing key) are
   # environment secrets, so only an approved v* tag run can publish.
   release:
-    needs: [candidate, boot, iso-plasma, live-plasma]
+    needs: [candidate, boot, iso-plasma, iso-cosmic, live-plasma, live-cosmic]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     environment:
@@ -173,11 +202,13 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PLASMA: ${{ needs.candidate.outputs.plasma }}
+          COSMIC: ${{ needs.candidate.outputs.cosmic }}
         run: |
           echo "$TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           echo "$TOKEN" | podman login ghcr.io --username "${{ github.actor }}" --password-stdin
           echo "## Promoted" >> "$GITHUB_STEP_SUMMARY"
           .github/scripts/promote.sh "ghcr.io/$OWNER/agentux" "$PLASMA" "$GITHUB_REF_NAME" stable
+          .github/scripts/promote.sh "ghcr.io/$OWNER/agentux-cosmic" "$COSMIC" "$GITHUB_REF_NAME" stable
 
       - uses: actions/download-artifact@v4
         with:
@@ -194,9 +225,12 @@ jobs:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           GH_TOKEN: ${{ github.token }}
           PLASMA_DIGEST: ${{ needs.candidate.outputs.plasma }}
+          COSMIC_DIGEST: ${{ needs.candidate.outputs.cosmic }}
           EXPECT: >-
-            agentux-${{ github.ref_name }}-x86_64 agentux-${{ github.ref_name }}-aarch64
-            agentux-live-${{ github.ref_name }}-x86_64 agentux-live-${{ github.ref_name }}-aarch64
+            agentux-plasma-live-${{ github.ref_name }}-x86_64 agentux-plasma-live-${{ github.ref_name }}-aarch64
+            agentux-plasma-installer-${{ github.ref_name }}-x86_64 agentux-plasma-installer-${{ github.ref_name }}-aarch64
+            agentux-cosmic-live-${{ github.ref_name }}-x86_64 agentux-cosmic-live-${{ github.ref_name }}-aarch64
+            agentux-cosmic-installer-${{ github.ref_name }}-x86_64 agentux-cosmic-installer-${{ github.ref_name }}-aarch64
         run: |
           ls -lh "$RUNNER_TEMP/isos"
           echo "## Published" >> "$GITHUB_STEP_SUMMARY"

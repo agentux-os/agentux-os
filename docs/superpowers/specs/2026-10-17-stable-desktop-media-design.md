@@ -1,5 +1,7 @@
 # Stable Desktop Media and Unified Offline Installer
 
+> **Decision, 2026-10-18:** the owner chose one live ISO and one offline installer ISO **per desktop** and architecture: eight ISOs per release (Plasma and COSMIC, live and installer, x86_64 and aarch64), all named `agentux-<desktop>-<live|installer>-<version>-<arch>.iso`, and COSMIC released alongside Plasma. This is the shipped design (agentux-os#68). The unified multi-desktop offline installer below stays a prototype: its payload and trust-chain findings are in the evidence report, and it is not planned for now.
+
 **Status:** approved for planning
 **Date:** 2026-10-17 (updated 2026-10-18: the Hyprland variant is retired, [ADR 0018](https://github.com/agentux-os/agentux/blob/main/docs/adr/0018-retire-the-hyprland-variant.md), so the media cover Plasma and COSMIC)
 

@@ -1,5 +1,7 @@
 # Stable Desktop Media Implementation Plan
 
+> **Decision, 2026-10-18:** the owner chose one live ISO and one offline installer ISO **per desktop** and architecture: eight ISOs per release (Plasma and COSMIC, live and installer, x86_64 and aarch64), all named `agentux-<desktop>-<live|installer>-<version>-<arch>.iso`, and COSMIC released alongside Plasma. This is the shipped design (agentux-os#68). The unified multi-desktop offline installer below stays a prototype: its payload and trust-chain findings are in the evidence report, and it is not planned for now.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Publish four stable per-desktop Live ISOs and two architecture-specific offline installer ISOs that install exactly one of Plasma or COSMIC.

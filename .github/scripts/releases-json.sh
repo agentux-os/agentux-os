@@ -49,6 +49,8 @@ mapfile -t tags < <(
 for tag in "${tags[@]}"; do
     images='{}'
     pairs=(plasma=agentux)
+    # COSMIC is released after v0.5.9, when Hyprland left.
+    [[ $tag != v0.5.9 && $(printf '%s\n' "$tag" v0.5.9 | sort -V | head -n1) == v0.5.9 ]] && pairs+=(cosmic=agentux-cosmic)
     # Hyprland shipped up to v0.5.9; older releases keep listing it, so the
     # systems still on it can name their version.
     [[ $(printf '%s\n' "$tag" v0.5.9 | sort -V | head -n1) == "$tag" ]] && pairs+=(hyprland=agentux-hyprland)
