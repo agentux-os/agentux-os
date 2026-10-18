@@ -19,34 +19,36 @@ try {
   await mkdir(payloadDir);
   const images = [];
   for (const [index, variant] of variants.entries()) {
-    const filename = `${variant}.oci.tar.zst`;
+    const filename = `${variant}.oci.tar`;
     await writeFile(join(payloadDir, filename), `signed fixture payload for ${variant}`);
-    images.push({ variant, image: `${imageRepositories[variant]}@${digest(String(index + 1))}`, filename });
+    images.push({ variant, signedIndex: `${imageRepositories[variant]}@${digest(String(index + 4))}`, image: `${imageRepositories[variant]}@${digest(String(index + 1))}`, filename });
   }
 
   const catalog = await buildCatalog({ payloadDir, arch: 'aarch64', version: 'v0.5.7', images });
   assert.deepEqual(catalog.variants, variants, 'catalog has all variants in deterministic order');
   assert.equal(catalog.arch, 'aarch64');
   assert.equal(catalog.payloads[0].imageDigest, digest('1'));
+  assert.equal(catalog.payloads[0].signedIndexDigest, digest('4'), 'catalog records the signed index the payload came from');
   assert.ok(catalog.payloads.every(({ size, sha256 }) => size > 0 && /^[a-f0-9]{64}$/.test(sha256)));
   assert.deepEqual(await verifyCatalog({ catalog, payloadDir, expectedArch: 'aarch64' }), { valid: true, variants });
 
   assert.equal(typeof catalogModule.parseImageManifest, 'function', 'catalog exports the workflow manifest parser');
   assert.deepEqual(
-    catalogModule.parseImageManifest([
-      'plasma\tghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tplasma.oci.tar.zst',
-      'hyprland\tghcr.io/agentux-os/agentux-hyprland@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\thyprland.oci.tar.zst',
-      'cosmic\tghcr.io/agentux-os/agentux-cosmic@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\tcosmic.oci.tar.zst',
-    ].join('\n')),
+    catalogModule.parseImageManifest(variants.map((variant, index) => [
+      variant,
+      `${imageRepositories[variant]}@sha256:${'f'.repeat(64)}`,
+      `${imageRepositories[variant]}@sha256:${'abc'[index].repeat(64)}`,
+      `${variant}.oci.tar`,
+    ].join('\t')).join('\n')),
     [
-      { variant: 'plasma', image: 'ghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', filename: 'plasma.oci.tar.zst' },
-      { variant: 'hyprland', image: 'ghcr.io/agentux-os/agentux-hyprland@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', filename: 'hyprland.oci.tar.zst' },
-      { variant: 'cosmic', image: 'ghcr.io/agentux-os/agentux-cosmic@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', filename: 'cosmic.oci.tar.zst' },
+      { variant: 'plasma', signedIndex: 'ghcr.io/agentux-os/agentux@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', image: 'ghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', filename: 'plasma.oci.tar' },
+      { variant: 'hyprland', signedIndex: 'ghcr.io/agentux-os/agentux-hyprland@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', image: 'ghcr.io/agentux-os/agentux-hyprland@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', filename: 'hyprland.oci.tar' },
+      { variant: 'cosmic', signedIndex: 'ghcr.io/agentux-os/agentux-cosmic@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', image: 'ghcr.io/agentux-os/agentux-cosmic@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', filename: 'cosmic.oci.tar' },
     ],
-    'three-column workflow manifests map to variant, immutable image, and filename',
+    'four-column workflow manifests map to variant, signed index, exported image, and filename',
   );
   assert.throws(
-    () => catalogModule.parseImageManifest('plasma\tghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tplasma.oci.tar.zst\textra'),
+    () => catalogModule.parseImageManifest(`plasma\t${imageRepositories.plasma}@sha256:${'f'.repeat(64)}\t${imageRepositories.plasma}@sha256:${'a'.repeat(64)}\tplasma.oci.tar\textra`),
     /invalid image manifest row/,
     'unexpected manifest columns are rejected instead of silently mis-mapped',
   );
@@ -57,7 +59,7 @@ try {
     'incomplete variant sets are rejected',
   );
   await assert.rejects(
-    () => buildCatalog({ payloadDir, arch: 'x86_64', version: 'v0.5.7', images: variants.map((variant) => ({ variant, image: `${imageRepositories[variant]}:latest`, filename: `${variant}.oci.tar.zst` })) }),
+    () => buildCatalog({ payloadDir, arch: 'x86_64', version: 'v0.5.7', images: variants.map((variant) => ({ variant, signedIndex: `${imageRepositories[variant]}@${digest('f')}`, image: `${imageRepositories[variant]}:latest`, filename: `${variant}.oci.tar` })) }),
     /immutable sha256 digest/,
     'mutable registry tags cannot enter the catalog',
   );
@@ -67,23 +69,31 @@ try {
     'cross-architecture payload catalogs are rejected',
   );
 
-  await writeFile(join(payloadDir, '../outside.oci.tar.zst'), 'must not escape payload directory');
+  await writeFile(join(payloadDir, '../outside.oci.tar'), 'must not escape payload directory');
   const escaped = structuredClone(catalog);
-  escaped.payloads[0].filename = '../outside.oci.tar.zst';
+  escaped.payloads[0].filename = '../outside.oci.tar';
   await assert.rejects(
     () => verifyCatalog({ catalog: escaped, payloadDir, expectedArch: 'aarch64' }),
     /unsafe payload filename/,
     'catalog filenames cannot escape the media payload directory',
   );
 
-  await writeFile(join(payloadDir, 'cosmic.oci.tar.zst'), 'altered after signing');
+  await writeFile(join(payloadDir, 'cosmic.oci.tar'), 'altered after signing');
   await assert.rejects(
     () => verifyCatalog({ catalog, payloadDir, expectedArch: 'aarch64' }),
     /payload integrity mismatch: cosmic/,
     'post-catalog payload alteration is detected',
   );
 
-  const saved = await readFile(join(payloadDir, 'plasma.oci.tar.zst'));
+  const unsigned = structuredClone(catalog);
+  unsigned.payloads[1].signedIndex = `${imageRepositories.hyprland}:latest`;
+  await assert.rejects(
+    () => verifyCatalog({ catalog: unsigned, payloadDir, expectedArch: 'aarch64' }),
+    /immutable sha256 digest: hyprland/,
+    'a payload must name the immutable signed index it was exported from',
+  );
+
+  const saved = await readFile(join(payloadDir, 'plasma.oci.tar'));
   assert.ok(saved.length > 0, 'catalog verification did not remove or rewrite payloads');
 } finally {
   await rm(root, { recursive: true, force: true });

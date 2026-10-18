@@ -36,9 +36,13 @@ jobs:
           node tests/offline-media-prototype.mjs
           node tests/offline-media-workflow-contract.mjs
 
+  # The full proof exports ~12 GiB per architecture and takes about half an
+  # hour: run it by hand (workflow_dispatch, once this file is on main), or
+  # from the prototype branch with [offline-proof] in the commit message
+  # (GitHub dispatches only workflows that exist on the default branch).
   payload-install:
     name: payload and offline install (${{ matrix.arch }})
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[offline-proof]'))
     needs: contracts
     strategy:
       fail-fast: false
@@ -67,7 +71,7 @@ jobs:
       - name: Install Linux payload and VM tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends podman skopeo zstd qemu-utils
+          sudo apt-get install -y -q --no-install-recommends podman skopeo jq qemu-utils
           if [ "$ARCH" = x86_64 ]; then sudo apt-get install -y -q --no-install-recommends qemu-system-x86 ovmf; fi
           sudo modprobe nbd max_part=8 || true
           df -h /
@@ -92,85 +96,138 @@ jobs:
               hyprland) repo=ghcr.io/agentux-os/agentux-hyprland ;;
               cosmic) repo=ghcr.io/agentux-os/agentux-cosmic ;;
             esac
-            digest="$(skopeo inspect --creds "$GHCR_USER:$GHCR_TOKEN" --override-arch "$GOARCH" --format '{{.Digest}}' "docker://$repo:latest")"
-            [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
-            cosign verify --key files/etc/pki/containers/agentux-os.pub "$repo@$digest" >/dev/null
-            cosign verify "$repo@$digest" \
+            # build.yml signs the multi-architecture index; the payload is
+            # one architecture's manifest from it. Verify the index, take
+            # the manifest it lists for this architecture, and export that
+            # exact digest (an earlier run exported by tag with
+            # --override-arch and recorded a digest no signature covered).
+            index_raw="$(skopeo inspect --raw --creds "$GHCR_USER:$GHCR_TOKEN" "docker://$repo:latest")"
+            index="sha256:$(printf '%s' "$index_raw" | sha256sum | cut -d' ' -f1)"
+            cosign verify --key files/etc/pki/containers/agentux-os.pub "$repo@$index" >/dev/null
+            cosign verify "$repo@$index" \
               --certificate-identity-regexp "^https://github.com/agentux-os/agentux-os/\.github/workflows/build\.yml@refs/heads/main$" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+            digest="$(jq -r --arg arch "$GOARCH" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest] | if length == 1 then .[0] else empty end' <<<"$index_raw")"
+            [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::$repo@$index lists no single linux/$GOARCH manifest"; exit 1; }
             archive="$payload_dir/$variant.oci.tar"
-            compressed="$archive.zst"
-            skopeo copy --quiet --preserve-digests --override-arch "$GOARCH" \
+            skopeo copy --quiet --preserve-digests \
               --src-creds "$GHCR_USER:$GHCR_TOKEN" "docker://$repo@$digest" "oci-archive:$archive:$variant"
-            exported="$(skopeo inspect --format '{{.Digest}}' "oci-archive:$archive:$variant")"
-            zstd --quiet --threads=0 -19 "$archive" -o "$compressed"
-            rm "$archive"
-            printf '%s\t%s@%s\t%s\n' "$variant" "$repo" "$exported" "$variant.oci.tar.zst" >>"$manifest"
-            printf '%s: source %s -> exported %s\n' "$variant" "$digest" "$exported"
+            exported="$(skopeo inspect --raw "oci-archive:$archive:$variant" | sha256sum | cut -d' ' -f1)"
+            if [[ "sha256:$exported" != "$digest" ]]; then
+              echo "::error::$variant: exported manifest sha256:$exported is not $digest from the signed index"
+              exit 1
+            fi
+            printf '%s\t%s@%s\t%s@%s\t%s\n' "$variant" "$repo" "$index" "$repo" "$digest" "$variant.oci.tar" >>"$manifest"
+            printf '%s: signed index %s -> %s manifest %s, exported unchanged\n' "$variant" "$index" "$GOARCH" "$digest"
           done
+          df -h "$RUNNER_TEMP"
 
           catalog="$RUNNER_TEMP/offline-prototype/catalog.json"
           node installer/offline-prototype/catalog.mjs build "$payload_dir" "$ARCH" "$VERSION" "$manifest" "$catalog"
           export COSIGN_PASSWORD=prototype-only
           (cd "$RUNNER_TEMP/offline-prototype/signing" && cosign generate-key-pair)
-          for file in "$payload_dir"/*.oci.tar.zst "$catalog"; do
-            cosign sign-blob --yes --key "$RUNNER_TEMP/offline-prototype/signing/cosign.key" \
-              --bundle "$file.sigstore.json" --tlog-upload=false "$file" >/dev/null
-            cosign verify-blob --key "$RUNNER_TEMP/offline-prototype/signing/cosign.pub" \
-              --bundle "$file.sigstore.json" --insecure-ignore-tlog "$file" >/dev/null
-          done
+          # Only the catalog is signed: it pins every payload's size and
+          # sha256, so verifying the catalog and then the selected payload
+          # against it covers the payload without a 4 GiB signature check.
+          cosign sign-blob --yes --key "$RUNNER_TEMP/offline-prototype/signing/cosign.key" \
+            --bundle "$catalog.sigstore.json" --tlog-upload=false "$catalog" >/dev/null
+          cosign verify-blob --key "$RUNNER_TEMP/offline-prototype/signing/cosign.pub" \
+            --bundle "$catalog.sigstore.json" --insecure-ignore-tlog "$catalog" >/dev/null
           node installer/offline-prototype/catalog.mjs verify "$payload_dir" "$ARCH" "$catalog"
           {
             echo "### Offline payload prototype ($ARCH)"
-            echo "The three source image digests were verified with the AgentUX key and GitHub Actions identity before export. Each compressed payload and the catalog were signed with a throwaway CI key and verified locally; this key is not used for release media."
+            echo "Each variant's multi-architecture index was verified with the AgentUX key and main's build.yml identity; its $GOARCH manifest was exported by digest and checked unchanged. The catalog was signed with a throwaway CI key (not a release key) and verified offline."
             echo ""
-            echo '| Variant | Compressed bytes | SHA-256 |'
-            echo '|---|---:|---|'
-            for file in "$payload_dir"/*.oci.tar.zst; do
-              name="$(basename "$file")"
-              bytes="$(wc -c <"$file" | tr -d ' ')"
-              hash="$(sha256sum "$file" | cut -d' ' -f1)"
-              echo "| ${name%.oci.tar.zst} | $bytes | `$hash` |"
-            done
-            echo ""
-            echo "Catalog: `$catalog`; arch: `$ARCH`; source images: `$manifest`."
+            echo '| Variant | Payload bytes | Exported manifest | Signed index |'
+            echo '|---|---:|---|---|'
+            while IFS=$'\t' read -r variant index image file; do
+              echo "| $variant | $(stat -c %s "$payload_dir/$file") | \`${image#*@}\` | \`${index#*@}\` |"
+            done <"$manifest"
           } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Confirm altered payload is rejected offline
-        run: |
-          set -euo pipefail
-          payload="$RUNNER_TEMP/offline-prototype/payloads/plasma.oci.tar.zst"
-          cp "$payload" "$RUNNER_TEMP/offline-prototype/tampered.oci.tar.zst"
-          printf x >>"$RUNNER_TEMP/offline-prototype/tampered.oci.tar.zst"
-          if cosign verify-blob --key "$RUNNER_TEMP/offline-prototype/signing/cosign.pub" \
-              --bundle "$payload.sigstore.json" --insecure-ignore-tlog \
-              "$RUNNER_TEMP/offline-prototype/tampered.oci.tar.zst" >/dev/null 2>&1; then
-            echo 'tampered payload passed signature verification' >&2
-            exit 1
-          fi
-          echo 'modified payload rejected by offline signature verification' >>"$GITHUB_STEP_SUMMARY"
-
-      - name: Install the selected OCI payload onto a throwaway disk with networking disabled
+      # Layers the variants share (Plasma and Hyprland build on the same
+      # Kinoite base) are stored once in a shared OCI layout, three times in
+      # separate archives: measure what one multi-image payload would save.
+      - name: Measure layers shared between the variants
         run: |
           set -euo pipefail
           payload_dir="$RUNNER_TEMP/offline-prototype/payloads"
-          archive="$payload_dir/plasma.oci.tar"
-          zstd --quiet --decompress "$payload_dir/plasma.oci.tar.zst" -o "$archive"
-          source_digest="$(awk -F '\t' '$1 == "plasma" {sub(/^.*@/, "", $2); print $2}' "$RUNNER_TEMP/offline-prototype/images.tsv")"
-          source_repo=ghcr.io/agentux-os/agentux
-          sudo podman load --input "$archive"
-          local_image="$(sudo podman images --format '{{.Repository}}:{{.Tag}}' | grep -E '(^|/)agentux(:|-)')"
-          test -n "$local_image"
-          sudo qemu-img create -q -f qcow2 "$RUNNER_TEMP/offline-prototype/target.qcow2" 40G
-          sudo qemu-nbd --connect=/dev/nbd0 "$RUNNER_TEMP/offline-prototype/target.qcow2"
-          trap 'sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true' EXIT
+          for file in "$payload_dir"/*.oci.tar; do
+            tar -tvf "$file" | awk -v v="$(basename "$file" .oci.tar)" '$6 ~ /^blobs\/sha256\// {print v "\t" $6 "\t" $3}'
+          done >"$RUNNER_TEMP/offline-prototype/blobs.tsv"
+          awk -F'\t' '
+            { total += $3; if (!seen[$2]++) unique += $3 }
+            END {
+              printf "| Separate archives | %.2f GiB |\n", total / 2^30
+              printf "| One shared OCI layout | %.2f GiB |\n", unique / 2^30
+              printf "| Saved | %.2f GiB (%.0f%%) |\n", (total - unique) / 2^30, 100 * (total - unique) / total
+            }' "$RUNNER_TEMP/offline-prototype/blobs.tsv" >"$RUNNER_TEMP/offline-prototype/sharing.md"
+          {
+            echo "### Shared layers ($ARCH)"
+            echo ""
+            echo '| Payload layout | Size |'
+            echo '|---|---:|'
+            cat "$RUNNER_TEMP/offline-prototype/sharing.md"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Confirm an altered catalog or payload is rejected offline
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/offline-prototype"
+          # A catalog edited after signing (here: another payload hash).
+          jq '.payloads[0].sha256 = ("0" * 64)' "$work/catalog.json" >"$work/tampered-catalog.json"
+          if cosign verify-blob --key "$work/signing/cosign.pub" --bundle "$work/catalog.json.sigstore.json" \
+              --insecure-ignore-tlog "$work/tampered-catalog.json" >/dev/null 2>&1; then
+            echo 'tampered catalog passed signature verification' >&2
+            exit 1
+          fi
+          # A payload that does not match the signed catalog.
+          if node installer/offline-prototype/catalog.mjs verify "$work/payloads" "$ARCH" "$work/tampered-catalog.json" 2>"$work/tampered.err"; then
+            echo 'payload not matching the catalog passed verification' >&2
+            exit 1
+          fi
+          grep -q 'payload integrity mismatch: plasma' "$work/tampered.err"
+          # A catalog for the other architecture.
+          other=aarch64; [[ $ARCH == aarch64 ]] && other=x86_64
+          if node installer/offline-prototype/catalog.mjs verify "$work/payloads" "$other" "$work/catalog.json" 2>/dev/null; then
+            echo 'catalog accepted for the wrong architecture' >&2
+            exit 1
+          fi
+          echo 'rejected offline: a catalog altered after signing, a payload not matching the catalog, a catalog for the other architecture' >>"$GITHUB_STEP_SUMMARY"
+
+      # bootc's own installer from the payload, network off: proves the
+      # oci-archive payload installs offline. The installer ISO goes through
+      # Anaconda (ostreecontainer --transport=oci-archive), still to prove
+      # in Task 1 (see the evidence report).
+      - name: Install the Plasma payload with bootc onto a throwaway disk, network disabled
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/offline-prototype"
+          archive="$work/payloads/plasma.oci.tar"
+          digest="$(jq -r '.payloads[0].imageDigest' "$work/catalog.json")"
+          loaded="$(sudo podman load --input "$archive" | sed -n 's/^Loaded image: //p' | tail -n1)"
+          test -n "$loaded"
+          sudo qemu-img create -q -f qcow2 "$work/target.qcow2" 40G
+          sudo qemu-nbd --connect=/dev/nbd0 "$work/target.qcow2"
+          trap 'sudo umount -R /mnt/target 2>/dev/null || true; sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null 2>&1 || true' EXIT
           sudo podman run --rm --privileged --pid=host --network=none \
             --security-opt label=type:unconfined_t \
             -v /dev:/dev -v /run/udev:/run/udev:ro -v "$archive:/run/agentux-source.oci.tar:ro" \
-            "$local_image" bootc install to-disk \
+            "$loaded" bootc install to-disk \
               --source-imgref=oci-archive:/run/agentux-source.oci.tar \
-              --target-imgref="$source_repo:stable" --skip-fetch-check --wipe /dev/nbd0
-          sudo qemu-nbd --disconnect /dev/nbd0
-          trap - EXIT
-          echo "Bootc wrote the selected Plasma payload ($source_digest) to a throwaway $ARCH qcow2 disk with the container network disabled." >>"$GITHUB_STEP_SUMMARY"
-          ls -lh "$RUNNER_TEMP/offline-prototype/target.qcow2" >>"$GITHUB_STEP_SUMMARY"
+              --target-imgref=ghcr.io/agentux-os/agentux:stable --skip-fetch-check --wipe /dev/nbd0
+          sudo partprobe /dev/nbd0 || true
+          sudo udevadm settle --timeout=30 || true
+          lsblk -f /dev/nbd0
+          # The disk holds an ostree deployment of the payload's image.
+          sudo mkdir -p /mnt/target
+          found=""
+          for part in $(lsblk -lnpo NAME,FSTYPE /dev/nbd0 | awk '$2 == "xfs" || $2 == "ext4" || $2 == "btrfs" {print $1}'); do
+            sudo mount -o ro "$part" /mnt/target || continue
+            if sudo test -d /mnt/target/ostree/deploy; then found="$part"; break; fi
+            sudo umount /mnt/target
+          done
+          test -n "$found" || { echo "::error::no ostree deployment on the installed disk"; exit 1; }
+          sudo find /mnt/target/ostree/deploy -maxdepth 4 -name '*.origin' -exec cat {} + | tee "$work/origin.txt"
+          grep -q 'ghcr.io/agentux-os/agentux:stable' "$work/origin.txt"
+          echo "bootc installed the Plasma payload ($digest) with the network disabled; the installed deployment on $found follows ghcr.io/agentux-os/agentux:stable." >>"$GITHUB_STEP_SUMMARY"

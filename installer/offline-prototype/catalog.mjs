@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,13 +12,23 @@ const IMAGE_REPOSITORIES = Object.freeze({
   cosmic: 'ghcr.io/agentux-os/agentux-cosmic',
 });
 
+// One row per variant: the variant, the signed multi-architecture index
+// (repo@digest, what cosign verified), the exported architecture manifest
+// (repo@digest, listed in that index), and the payload file name.
 export function parseImageManifest(contents) {
   const rows = contents.trim().split(/\r?\n/);
   return rows.map((row) => {
-    const [variant, image, filename, ...extra] = row.split('\t');
-    if (!variant || !image || !filename || extra.length > 0) throw new Error('invalid image manifest row');
-    return { variant, image, filename };
+    const [variant, signedIndex, image, filename, ...extra] = row.split('\t');
+    if (!variant || !signedIndex || !image || !filename || extra.length > 0) throw new Error('invalid image manifest row');
+    return { variant, signedIndex, image, filename };
   });
+}
+
+// Payloads are several GiB: hash them as a stream (readFile stops at 2 GiB).
+async function sha256File(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
 }
 
 function imageDigest(image, variant) {
@@ -37,7 +48,7 @@ function safeFilename(filename) {
     && filename.length > 0
     && basename(filename) === filename
     && !filename.includes('..')
-    && /^[a-z0-9][a-z0-9._-]*\.oci\.tar\.zst$/.test(filename);
+    && /^[a-z0-9][a-z0-9._-]*\.oci\.tar$/.test(filename);
 }
 
 export async function buildCatalog({ payloadDir, arch, version, images }) {
@@ -54,16 +65,19 @@ export async function buildCatalog({ payloadDir, arch, version, images }) {
   for (const variant of VARIANTS) {
     const image = images.find((candidate) => candidate.variant === variant);
     const digest = imageDigest(image.image, variant);
+    const signedIndexDigest = imageDigest(image.signedIndex, variant);
     if (!safeFilename(image.filename)) throw new Error(`unsafe payload filename: ${variant}`);
     const path = join(payloadDir, image.filename);
-    const [bytes, info] = await Promise.all([readFile(path), stat(path)]);
+    const [sha256, info] = await Promise.all([sha256File(path), stat(path)]);
     payloads.push({
       variant,
       image: image.image,
       imageDigest: digest,
+      signedIndex: image.signedIndex,
+      signedIndexDigest,
       filename: image.filename,
       size: info.size,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
+      sha256,
     });
   }
 
@@ -86,9 +100,10 @@ export async function verifyCatalog({ catalog, payloadDir, expectedArch }) {
     if (payload?.variant !== variant) throw new Error(`payload order mismatch: ${variant}`);
     if (!safeFilename(payload.filename)) throw new Error(`unsafe payload filename: ${variant}`);
     if (imageDigest(payload.image, variant) !== payload.imageDigest) throw new Error(`image digest mismatch: ${variant}`);
-    const bytes = await readFile(join(payloadDir, payload.filename));
-    if (bytes.length !== payload.size
-        || createHash('sha256').update(bytes).digest('hex') !== payload.sha256) {
+    if (imageDigest(payload.signedIndex, variant) !== payload.signedIndexDigest) throw new Error(`signed index mismatch: ${variant}`);
+    const path = join(payloadDir, payload.filename);
+    const info = await stat(path);
+    if (info.size !== payload.size || await sha256File(path) !== payload.sha256) {
       throw new Error(`payload integrity mismatch: ${variant}`);
     }
   }

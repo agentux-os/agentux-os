@@ -8,7 +8,7 @@
 
 **Tech Stack:** Fedora bootc, Anaconda / bootc-image-builder, Podman and Skopeo, Cosign, SquashFS/Titanoboa, GitHub Actions, Bash, Node.js contract tests, Astro website.
 
-**Spec:** [`docs/superpowers/specs/2026-10-17-cosmic-live-stable-design.md`](../specs/2026-10-17-cosmic-live-stable-design.md)
+**Spec:** [`docs/superpowers/specs/2026-10-17-stable-desktop-media-design.md`](../specs/2026-10-17-stable-desktop-media-design.md)
 
 ## Global Constraints
 

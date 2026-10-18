@@ -15,7 +15,13 @@ assert.match(triggers, /^  workflow_dispatch:\s*$/m, 'the full offline install p
 assert.match(contractJob, /node tests\/offline-media-prototype\.mjs/, 'fast catalog contracts run on PRs');
 assert.match(contractJob, /node tests\/offline-media-workflow-contract\.mjs/, 'workflow scheduling contract runs on PRs');
 assert.match(payloadJob, /needs: contracts/, 'full proof waits for the contract checks');
-assert.match(payloadJob, /if: github\.event_name == 'workflow_dispatch'/, 'expensive multiarch payload/install jobs only run on manual dispatch');
+assert.match(
+  payloadJob,
+  /if: github\.event_name == 'workflow_dispatch' \|\| \(github\.event_name == 'push' && contains\(github\.event\.head_commit\.message, '\[offline-proof\]'\)\)\n/,
+  'expensive multiarch payload/install jobs run only by hand or on an explicit [offline-proof] commit',
+);
+assert.match(payloadJob, /"docker:\/\/\$repo@\$digest" "oci-archive:/, 'payloads are exported by the architecture digest listed in the signed index');
+assert.match(payloadJob, /is not \$digest from the signed index/, 'an exported manifest that differs from the signed one fails the proof');
 assert.match(payloadJob, /skopeo copy/, 'manual validation still exports the real OCI payloads');
 assert.match(payloadJob, /bootc install to-disk/, 'manual validation still tests offline disk installation');
 
