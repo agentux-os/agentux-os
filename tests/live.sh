@@ -83,6 +83,10 @@ as_user() {
 }
 user_systemctl() { as_user systemctl --user "$@"; }
 
+# The live user's graphical session. Plasma's login manager registers it as
+# Type=wayland. COSMIC's greeter (greetd) starts cosmic-session from a
+# session logind records as a tty one, with no Desktop, so for COSMIC the
+# user's seat0 session counts once its compositor, cosmic-comp, runs.
 wayland_session() {
     local id
     for id in $(loginctl list-sessions --no-legend | awk -v u="$user" '$3 == u {print $1}'); do
@@ -90,7 +94,22 @@ wayland_session() {
             echo "$id"; return 0
         fi
     done
+    if "$is_cosmic" && pgrep -u "$user" -x cosmic-comp >/dev/null; then
+        for id in $(loginctl list-sessions --no-legend | awk -v u="$user" '$3 == u {print $1}'); do
+            if [[ "$(loginctl show-session "$id" -P Seat)" == seat0 ]]; then
+                echo "$id"; return 0
+            fi
+        done
+    fi
     return 1
+}
+
+# The desktop a running process of the live user was started in
+# (XDG_CURRENT_DESKTOP from its environment).
+process_desktop() {
+    local pid
+    pid="$(pgrep -u "$user" -x "$1" | head -n1)" || return 1
+    tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^XDG_CURRENT_DESKTOP=//p'
 }
 
 phase_session() {
@@ -129,10 +148,20 @@ phase_checks() {
     mapfile -t session_processes < <(desktop_session_processes "$image_id")
     if "$is_cosmic"; then
         session_processes=(cosmic-session cosmic-comp)
-        if [[ "$(loginctl show-session "$session" -P Desktop)" == *cosmic* ]]; then
-            ok "COSMIC is the active desktop session"
+        local desktop
+        desktop="$(loginctl show-session "$session" -P Desktop 2>/dev/null)"
+        [[ -n "$desktop" ]] || desktop="$(process_desktop cosmic-comp)"
+        if [[ "${desktop,,}" == *cosmic* ]]; then
+            ok "COSMIC is the active desktop session ($desktop)"
         else
-            bad "active desktop is not COSMIC ($(loginctl show-session "$session" -P Desktop))"
+            bad "active desktop is not COSMIC (${desktop:-none})"
+        fi
+        # COSMIC has no plasma-setup: its installs turn on Initial Setup to
+        # create the account at first boot.
+        if grep -qx 'firstboot --enable' /usr/share/agentux/live/install.ks; then
+            ok "COSMIC installer enables Initial Setup (firstboot --enable)"
+        else
+            bad "COSMIC installer lacks firstboot --enable"
         fi
     fi
     for proc in "${session_processes[@]}" agentux-cockpit; do
@@ -363,7 +392,6 @@ phase_verify() {
         else
             bad "installed COSMIC session or Initial Setup backend missing"
         fi
-        if grep -qx 'firstboot --enable' /usr/share/agentux/live/install.ks; then ok "COSMIC installer enabled Initial Setup"; else bad "COSMIC installer lacks firstboot --enable"; fi
     fi
     if grep -q '^liveuser:' "$deploy/etc/passwd" 2>/dev/null; then bad "liveuser exists in the installed system"; else ok "no liveuser in the installed system"; fi
     if grep -q '^installtest:' "$deploy/etc/passwd" 2>/dev/null; then ok "the installer's user exists"; else warn "installtest user not found in the deployment's /etc/passwd"; fi
