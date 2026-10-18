@@ -111,16 +111,17 @@ export async function verifyCatalog({ catalog, payloadDir, expectedArch }) {
   return { valid: true, variants: [...VARIANTS] };
 }
 
-async function main(args) {
-  const [command, payloadDir, arch, version, manifestPath, catalogPath] = args;
-  if (command === 'build' && payloadDir && arch && version && manifestPath && catalogPath) {
+export async function main(args) {
+  const [command, payloadDir, arch, ...rest] = args;
+  if (command === 'build' && payloadDir && arch && rest.length === 3) {
+    const [version, manifestPath, catalogPath] = rest;
     const images = parseImageManifest(await readFile(manifestPath, 'utf8'));
     const catalog = await buildCatalog({ payloadDir, arch, version, images });
     await writeFile(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, { flag: 'wx' });
     return;
   }
-  if (command === 'verify' && payloadDir && arch && manifestPath) {
-    const catalog = JSON.parse(await readFile(manifestPath, 'utf8'));
+  if (command === 'verify' && payloadDir && arch && rest.length === 1) {
+    const catalog = JSON.parse(await readFile(rest[0], 'utf8'));
     await verifyCatalog({ catalog, payloadDir, expectedArch: arch });
     return;
   }

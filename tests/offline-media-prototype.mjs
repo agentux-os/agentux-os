@@ -93,6 +93,19 @@ try {
     'a payload must name the immutable signed index it was exported from',
   );
 
+  // The command line the workflow runs: build a catalog, then verify it.
+  const cliDir = join(root, 'cli');
+  await mkdir(cliDir);
+  for (const variant of variants) await writeFile(join(cliDir, `${variant}.oci.tar`), `cli payload for ${variant}`);
+  await writeFile(join(root, 'images.tsv'), images.map(({ variant, signedIndex, image, filename }) => [variant, signedIndex, image, filename].join('\t')).join('\n'));
+  await catalogModule.main(['build', cliDir, 'x86_64', 'prototype-cli', join(root, 'images.tsv'), join(root, 'cli-catalog.json')]);
+  await catalogModule.main(['verify', cliDir, 'x86_64', join(root, 'cli-catalog.json')]);
+  await assert.rejects(
+    () => catalogModule.main(['verify', cliDir, 'aarch64', join(root, 'cli-catalog.json')]),
+    /architecture mismatch/,
+    'the verify command rejects the other architecture',
+  );
+
   const saved = await readFile(join(payloadDir, 'plasma.oci.tar'));
   assert.ok(saved.length > 0, 'catalog verification did not remove or rewrite payloads');
 } finally {
