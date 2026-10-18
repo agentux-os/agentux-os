@@ -1,37 +1,37 @@
 # Offline Installer Payload Prototype — Evidence and Gate
 
-**Status:** incomplete; no implementation go decision  
-**Date:** 2026-10-17  
+**Status:** payload format and offline trust chain proven; Anaconda handoff still to prove
+**Date:** 2026-10-17 (results 2026-10-18)
 **Plan:** [`../2026-10-17-stable-desktop-media.md`](../2026-10-17-stable-desktop-media.md)
+**Variants:** Plasma and COSMIC. The Hyprland variant was retired after v0.5.9 ([ADR 0018](https://github.com/agentux-os/agentux/blob/main/docs/adr/0018-retire-the-hyprland-variant.md)).
 
-## Findings from read-only inspection
+## What was run
 
-1. The existing installer is already offline-capable for one image: `bootc-image-builder` embeds the selected container image, and its generated Anaconda kickstart uses `ostreecontainer`. `disk_config/iso.toml` documents that contract.
-2. Anaconda's `ostreecontainer` transport supports a local OCI layout. The upstream Anaconda discussion describes `ostreecontainer --url=/mycontainerdir --transport=oci`; the current PyKickstart reference lists `registry`, `oci`, and `oci-archive` transports. This makes an OCI layout directory, compressed as a media payload and extracted only for the selected variant, a plausible prototype candidate. It is **not yet validated** with AgentUX images or the project's Anaconda build.
-3. A plausible trust chain is to verify each OCI source digest/signature during release build, then sign the exact compressed media payload and catalog with the AgentUX media key. The offline installer would verify the signed catalog and selected payload before extraction, then let Anaconda consume the local OCI layout. This chain is only a hypothesis until end-to-end verification proves the identity binding and offline behavior.
-4. The current public `latest.json` reports v0.5.6 Plasma x86_64 installer size **5,084,020,736 bytes** and aarch64 **4,998,758,400 bytes**. It does not include current per-variant Hyprland or COSMIC installer payload baselines, so a total-size comparison cannot be calculated from this manifest alone.
-5. Existing x86_64 install validation is `tests/iso-vm.sh`: boot the ISO in QEMU/KVM, use its installer payload, reboot the installed disk, and run the installed-system checks. This harness must be extended to disable networking and choose each variant for the proposed installer.
+[`.github/workflows/offline-media-prototype.yml`](../../../../.github/workflows/offline-media-prototype.yml), the `payload and offline install` jobs, on GitHub's `ubuntu-24.04` (x86_64, KVM) and `ubuntu-24.04-arm` (aarch64) runners, from `:latest` of `ghcr.io/agentux-os/agentux` and `ghcr.io/agentux-os/agentux-cosmic`. Passing run: [39087251741](https://github.com/agentux-os/agentux-os/actions/runs/39087251741) (commit `56f82cc`). The job runs on demand (`workflow_dispatch`, or an `[offline-proof]` commit on the prototype branch); the catalog contract tests run on every PR that touches the prototype.
 
-## Blocked measurements
+## Results
 
-The end-to-end prototype and runner capacity measurements were not possible in this environment:
+1. **Export keeps exactly what is signed.** build.yml signs each image's multi-architecture index (AgentUX key and keyless, main's `build.yml` identity). The job verifies both signatures on the index, takes the `linux/<arch>` manifest the index lists, exports that manifest by digest to an `oci-archive` with `--preserve-digests`, and fails unless the exported manifest has that digest. Both variants, both architectures: exported unchanged. An earlier run exported by tag with `--override-arch` and recorded a manifest digest that no signature covered; that is what this check now prevents.
+2. **Catalog.** [`installer/offline-prototype/catalog.mjs`](../../../../installer/offline-prototype/catalog.mjs) records, per variant, the signed index, the exported manifest, the payload file, its size and sha256 (streamed: payloads are 3–4 GiB, over Node's 2 GiB `readFile` limit). Only the catalog is signed; it pins every payload, so the installer verifies the catalog's signature and then the selected payload's hash, offline. The prototype signs with a throwaway CI key, never a release key.
+3. **Offline rejection.** Rejected without network: a catalog changed after signing (cosign), a payload that does not match the signed catalog (`payload integrity mismatch`), and the catalog of the other architecture. The contract tests also reject unsafe file names, mutable tags, missing variants and a payload without an immutable signed index.
+4. **Offline install.** `bootc install to-disk --source-imgref=oci-archive:… --filesystem btrfs` from the Plasma payload, in a container with `--network=none`, onto a throwaway qcow2 disk: completed on both architectures in about 5–7 minutes. The disk holds an ostree deployment whose origin is `container-image-reference=ostree-unverified-registry:ghcr.io/agentux-os/agentux:stable`, so the installed system follows the stable channel. (Kinoite's image sets no default root filesystem; `bootc` needs `--filesystem`.)
+5. **Size.** Layers are already compressed in the archives; recompressing them (the first draft used `zstd -19`) costs build time for little. The measure that matters is sharing between variants:
 
-- Git Bash fails to launch with `CreateFileMapping ... Win32 error 5`.
-- WSL reports `E_ACCESSDENIED` while enumerating distros.
-- Docker CLI cannot connect to either configured Docker Engine named pipe (permission denied).
-- `podman`, `skopeo`, `cosign`, `qemu-system-x86_64`, and `qemu-img` are not installed/available as Windows commands.
-- `gh run list` cannot reach GitHub's API because the configured proxy at `127.0.0.1:9` refuses the connection.
+| Architecture | Separate archives | One shared OCI layout | Saved |
+|---|---:|---:|---:|
+| x86_64 | 6.91 GiB | 6.04 GiB | 0.87 GiB (13%) |
+| aarch64 | 6.89 GiB | 5.86 GiB | 1.03 GiB (15%) |
 
-Therefore there are no measured payload sizes, peak disk/RAM values, decompression/install timings, offline signature-verification results, or no-network VM installation results. No local build or remote workflow was started.
+   With three variants (Plasma and Hyprland both on Kinoite) a shared layout saved 37% (10.70 → 6.70 GiB on x86_64). Plasma and COSMIC have different bases, so the saving is small, but a shared layout is still smaller and is one directory instead of several archives. The current Plasma-only installer ISO is about 4.7 GiB (`agentux-v0.5.6-x86_64.iso`, 5,084,020,736 bytes); a two-desktop offline ISO would be roughly 6–7 GiB, which needs an 8 GB USB stick and no longer fits a single-layer DVD.
 
-## Gate result
+## Gate
 
-**No-go for implementation Tasks 2–4 until the prototype runs on a Linux environment with container, Cosign, and QEMU/KVM or TCG support.** The local OCI transport is technically plausible based on upstream Anaconda interfaces, but the approved plan requires a demonstrated signed-image export → compressed payload → offline verification → local Anaconda install path. Do not treat upstream interface documentation as proof of the full AgentUX workflow, and do not weaken the signature/offline requirements.
+- **Go** for the payload format (OCI, by digest, from the signed index), the catalog and its offline verification, and for building one offline installer per architecture from them.
+- **Still to prove before Task 3:** the handoff inside the installer ISO. The test above uses bootc's own installer; the ISO goes through Anaconda (`ostreecontainer --transport=oci-archive` or `oci` with a local path), which has to be booted in a VM with networking off, choosing each desktop. That is Task 1's remaining step.
+- **Decide in Task 2:** one shared OCI layout for both variants (smaller, one tree to verify) or one archive per variant (simpler to verify and extract one).
+- **Check:** the installed origin says `ostree-unverified-registry`, the same as an install from the network; the containers policy (`/etc/containers/policy.json`, AgentUX key required) is what checks `bootc upgrade`, so this is expected, but Task 3 should confirm the first upgrade of an offline install still enforces it.
 
 ## Sources
 
-- Current public manifest: <https://download.agentuxos.org/latest.json> (observed v0.5.6 during this investigation).
-- Anaconda/PyKickstart `ostreecontainer` transport discussion: <https://github.com/rhinstaller/anaconda/discussions/5197>.
-- PyKickstart command reference: <https://pykickstart.readthedocs.io/_/downloads/en/latest/pdf/>.
-- Repository installer configuration: [`disk_config/iso.toml`](../../../../disk_config/iso.toml).
-- Repository VM install harness: [`tests/iso-vm.sh`](../../../../tests/iso-vm.sh).
+- Anaconda/PyKickstart `ostreecontainer` transports: <https://github.com/rhinstaller/anaconda/discussions/5197>, <https://pykickstart.readthedocs.io/>.
+- Repository installer configuration: [`disk_config/iso.toml`](../../../../disk_config/iso.toml); VM install harness: [`tests/iso-vm.sh`](../../../../tests/iso-vm.sh).
