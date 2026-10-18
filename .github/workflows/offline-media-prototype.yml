@@ -81,7 +81,7 @@ jobs:
       - name: Run catalog contract tests
         run: node tests/offline-media-prototype.mjs
 
-      - name: Export and authenticate all three image payloads
+      - name: Export and authenticate the image payloads
         id: payloads
         run: |
           set -euo pipefail
@@ -90,10 +90,9 @@ jobs:
           payload_dir="$RUNNER_TEMP/offline-prototype/payloads"
           manifest="$RUNNER_TEMP/offline-prototype/images.tsv"
           : >"$manifest"
-          for variant in plasma hyprland cosmic; do
+          for variant in plasma cosmic; do
             case "$variant" in
               plasma) repo=ghcr.io/agentux-os/agentux ;;
-              hyprland) repo=ghcr.io/agentux-os/agentux-hyprland ;;
               cosmic) repo=ghcr.io/agentux-os/agentux-cosmic ;;
             esac
             # build.yml signs the multi-architecture index; the payload is
@@ -145,9 +144,10 @@ jobs:
             done <"$manifest"
           } >>"$GITHUB_STEP_SUMMARY"
 
-      # Layers the variants share (Plasma and Hyprland build on the same
-      # Kinoite base) are stored once in a shared OCI layout, three times in
-      # separate archives: measure what one multi-image payload would save.
+      # Layers the variants share are stored once in a shared OCI layout, once
+      # per variant in separate archives: measure what one multi-image payload
+      # would save. (With Hyprland, which shared Kinoite with Plasma, a shared
+      # layout saved 37%: 6.70 GiB instead of 10.70 GiB on x86_64.)
       - name: Measure layers shared between the variants
         run: |
           set -euo pipefail
@@ -215,7 +215,7 @@ jobs:
             -v /dev:/dev -v /run/udev:/run/udev:ro -v "$archive:/run/agentux-source.oci.tar:ro" \
             "$loaded" bootc install to-disk \
               --source-imgref=oci-archive:/run/agentux-source.oci.tar \
-              --target-imgref=ghcr.io/agentux-os/agentux:stable --skip-fetch-check --wipe /dev/nbd0
+              --target-imgref=ghcr.io/agentux-os/agentux:stable --skip-fetch-check \n              --filesystem btrfs --wipe /dev/nbd0
           sudo partprobe /dev/nbd0 || true
           sudo udevadm settle --timeout=30 || true
           lsblk -f /dev/nbd0

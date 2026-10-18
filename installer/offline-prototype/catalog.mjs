@@ -4,11 +4,10 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const VARIANTS = Object.freeze(['plasma', 'hyprland', 'cosmic']);
+export const VARIANTS = Object.freeze(['plasma', 'cosmic']);
 const ARCHITECTURES = new Set(['x86_64', 'aarch64']);
 const IMAGE_REPOSITORIES = Object.freeze({
   plasma: 'ghcr.io/agentux-os/agentux',
-  hyprland: 'ghcr.io/agentux-os/agentux-hyprland',
   cosmic: 'ghcr.io/agentux-os/agentux-cosmic',
 });
 
@@ -58,7 +57,7 @@ export async function buildCatalog({ payloadDir, arch, version, images }) {
   }
   if (!Array.isArray(images) || images.length !== VARIANTS.length
       || VARIANTS.some((variant) => images.filter((item) => item.variant === variant).length !== 1)) {
-    throw new Error('catalog requires exactly plasma, hyprland, cosmic');
+    throw new Error(`catalog requires exactly ${VARIANTS.join(', ')}`);
   }
 
   const payloads = [];
@@ -89,10 +88,10 @@ export async function verifyCatalog({ catalog, payloadDir, expectedArch }) {
   if (catalog.arch !== expectedArch) throw new Error(`architecture mismatch: expected ${expectedArch}, got ${catalog.arch}`);
   if (!Array.isArray(catalog.variants) || catalog.variants.length !== VARIANTS.length
       || VARIANTS.some((variant, index) => catalog.variants[index] !== variant)) {
-    throw new Error('catalog variants must be exactly plasma, hyprland, cosmic in canonical order');
+    throw new Error(`catalog variants must be exactly ${VARIANTS.join(', ')} in canonical order`);
   }
   if (!Array.isArray(catalog.payloads) || catalog.payloads.length !== VARIANTS.length) {
-    throw new Error('catalog must contain exactly three payloads');
+    throw new Error(`catalog must contain exactly ${VARIANTS.length} payloads`);
   }
 
   for (const [index, variant] of VARIANTS.entries()) {

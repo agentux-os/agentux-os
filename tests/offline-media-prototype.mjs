@@ -6,10 +6,9 @@ import * as catalogModule from '../installer/offline-prototype/catalog.mjs';
 const { buildCatalog, verifyCatalog } = catalogModule;
 
 const digest = (letter) => `sha256:${letter.repeat(64)}`;
-const variants = ['plasma', 'hyprland', 'cosmic'];
+const variants = ['plasma', 'cosmic'];
 const imageRepositories = {
   plasma: 'ghcr.io/agentux-os/agentux',
-  hyprland: 'ghcr.io/agentux-os/agentux-hyprland',
   cosmic: 'ghcr.io/agentux-os/agentux-cosmic',
 };
 const root = await mkdtemp(join(tmpdir(), 'agentux-offline-prototype-'));
@@ -42,8 +41,7 @@ try {
     ].join('\t')).join('\n')),
     [
       { variant: 'plasma', signedIndex: 'ghcr.io/agentux-os/agentux@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', image: 'ghcr.io/agentux-os/agentux@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', filename: 'plasma.oci.tar' },
-      { variant: 'hyprland', signedIndex: 'ghcr.io/agentux-os/agentux-hyprland@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', image: 'ghcr.io/agentux-os/agentux-hyprland@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', filename: 'hyprland.oci.tar' },
-      { variant: 'cosmic', signedIndex: 'ghcr.io/agentux-os/agentux-cosmic@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', image: 'ghcr.io/agentux-os/agentux-cosmic@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', filename: 'cosmic.oci.tar' },
+      { variant: 'cosmic', signedIndex: 'ghcr.io/agentux-os/agentux-cosmic@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', image: 'ghcr.io/agentux-os/agentux-cosmic@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', filename: 'cosmic.oci.tar' },
     ],
     'four-column workflow manifests map to variant, signed index, exported image, and filename',
   );
@@ -54,8 +52,8 @@ try {
   );
 
   await assert.rejects(
-    () => buildCatalog({ payloadDir, arch: 'x86_64', version: 'v0.5.7', images: images.slice(0, 2) }),
-    /exactly plasma, hyprland, cosmic/,
+    () => buildCatalog({ payloadDir, arch: 'x86_64', version: 'v0.5.7', images: images.slice(0, 1) }),
+    /exactly plasma, cosmic/,
     'incomplete variant sets are rejected',
   );
   await assert.rejects(
@@ -86,10 +84,10 @@ try {
   );
 
   const unsigned = structuredClone(catalog);
-  unsigned.payloads[1].signedIndex = `${imageRepositories.hyprland}:latest`;
+  unsigned.payloads[1].signedIndex = `${imageRepositories.cosmic}:latest`;
   await assert.rejects(
     () => verifyCatalog({ catalog: unsigned, payloadDir, expectedArch: 'aarch64' }),
-    /immutable sha256 digest: hyprland/,
+    /immutable sha256 digest: cosmic/,
     'a payload must name the immutable signed index it was exported from',
   );
 
