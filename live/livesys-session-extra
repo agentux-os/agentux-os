@@ -12,16 +12,19 @@ rm -f /home/liveuser/Desktop/liveinst.desktop \
     /home/liveuser/.local/share/applications/liveinst.desktop
 mkdir -p /home/liveuser/Desktop
 install -m 0755 /usr/share/applications/agentux-live-install.desktop /home/liveuser/Desktop/
+# livesys-main sources this file: an `exit` here would end livesys-main
+# itself, before it hands /home/liveuser to the live user and marks the
+# system configured (COSMIC's compositor then cannot write its settings).
 if [ "${IMAGE_ID:-}" = agentux-cosmic ]; then
     install -m 0755 /usr/share/applications/agentux-live-demo.desktop /home/liveuser/Desktop/
-    exit 0
-fi
-if [ -f /home/liveuser/.config/kickoffrc ]; then
-    sed -i 's|/usr/share/applications/liveinst.desktop|/usr/share/applications/agentux-live-install.desktop|' \
-        /home/liveuser/.config/kickoffrc
-fi
+else
+    if [ -f /home/liveuser/.config/kickoffrc ]; then
+        sed -i 's|/usr/share/applications/liveinst.desktop|/usr/share/applications/agentux-live-install.desktop|' \
+            /home/liveuser/.config/kickoffrc
+    fi
 
-# The desktop note's text (the note widget itself comes from the layout
-# script, with noteId agentux-live).
-install -D -m 0644 /usr/share/agentux/live/note.html \
-    /home/liveuser/.local/share/plasma_notes/agentux-live
+    # The desktop note's text (the note widget itself comes from the layout
+    # script, with noteId agentux-live).
+    install -D -m 0644 /usr/share/agentux/live/note.html \
+        /home/liveuser/.local/share/plasma_notes/agentux-live
+fi
