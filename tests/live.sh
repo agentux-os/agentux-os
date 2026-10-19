@@ -272,8 +272,10 @@ phase_checks() {
 }
 
 phase_approve() {
-    local request
-    request="$(as_user aux ps | awk '$2 == "run" { print $1; exit }')"
+    local request ps
+    # Not piped: awk's early exit would break aux's pipe while it still writes.
+    ps="$(as_user aux ps)"
+    request="$(awk '$2 == "run" { print $1; exit }' <<<"$ps")"
     if [[ -n "$request" ]] && as_user aux approve "$request" --message "approved by the live test"; then
         ok "approved demo request $request"
     else

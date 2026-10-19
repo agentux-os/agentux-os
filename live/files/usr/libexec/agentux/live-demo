@@ -102,9 +102,12 @@ fi
 
 # approve_plan RUN: approves the run's plan once it waits for approval.
 approve_plan() {
-    local run="$1" request=""
+    local run="$1" request="" ps
     for (( i = 0; i < 60; i++ )); do
-        request="$(aux ps | awk -v r="$run" '$2 == "run" && $3 == r { print $1; exit }')"
+        # aux ps's whole output first: awk's early exit would close the pipe
+        # while aux still writes, and aux dies of the broken pipe (pipefail).
+        ps="$(aux ps)"
+        request="$(awk -v r="$run" '$2 == "run" && $3 == r { print $1; exit }' <<<"$ps")"
         [[ -n "$request" ]] && break
         sleep 1
     done
