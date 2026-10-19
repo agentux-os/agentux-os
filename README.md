@@ -81,7 +81,7 @@ Use `:latest` instead of `:stable` for the nightly builds ([Release channels](#r
 ## Contents
 
 - **Use it:** [Variants](#variants) · [Architectures](#architectures) · [Release channels](#release-channels) · [Install](#install) · [Try it live](#try-it-live) · [Downloads](#downloads) · [Verifying the image](#verifying-the-image)
-- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Version](#version) · [Default wallpaper](#default-wallpaper) · [Hyprland (retired)](#hyprland-retired) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
+- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Version](#version) · [Default wallpaper](#default-wallpaper) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
 - **Work on it:** [Build and test locally](#build-and-test-locally) · [Boot test](#boot-test) · [Live ISO test](#live-iso-test) · [Installer ISO test](#installer-iso-test) · [How a release reaches `:stable`](#how-a-release-reaches-stable) · [License](#license)
 
 Deep reference detail is folded away in collapsible sections; click a summary to expand it.
@@ -95,7 +95,7 @@ The one `Containerfile` builds two images, chosen by the build argument `VARIANT
 | `ghcr.io/agentux-os/agentux` | `plasma` (default) | KDE Plasma, the AgentUX defaults described below |
 | `ghcr.io/agentux-os/agentux-cosmic` | `cosmic` | Fedora COSMIC Atomic with AgentUX integration; no Plasma session or overlay |
 
-Both are multi-arch, signed and checked against the AgentUX key. Both are released: each release ships a live and an offline installer ISO of each, for both architectures. Switching between Plasma and COSMIC with `bootc switch` is not a supported path yet: install the one you want. The Hyprland variant was retired after v0.5.9 ([Hyprland (retired)](#hyprland-retired)).
+Both are multi-arch, signed and checked against the AgentUX key. Both are released: each release ships a live and an offline installer ISO of each, for both architectures. Switching between Plasma and COSMIC with `bootc switch` is not a supported path yet: install the one you want.
 
 ## Architectures
 
