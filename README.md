@@ -434,14 +434,6 @@ Since the symlink belongs to `desktop-backgrounds-kde`, `rpm -V desktop-backgrou
 
 </details>
 
-## Hyprland (retired)
-
-Up to v0.5.9 AgentUX also shipped `ghcr.io/agentux-os/agentux-hyprland`: the Plasma image plus a Hyprland session. It is no longer built or released; its last images stay in the registry, signed, and every AgentUX image keeps requiring the AgentUX signature for that repository. A system installed from it keeps working but gets no updates; move it to the Plasma image, which keeps the user's home and settings:
-
-```sh
-sudo bootc switch ghcr.io/agentux-os/agentux:stable
-```
-
 ## AgentUX versions
 
 The AgentUX components are installed from their GitHub releases, pinned in one place, the `ARG`s at the top of the AgentUX section of the [`Containerfile`](Containerfile). The architecture-specific `agentux-cockpit` RPM remains independent of desktop configuration. Three architecture-independent bundles provide common integration and the selected desktop's settings.
