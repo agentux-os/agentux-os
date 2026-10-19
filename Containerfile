@@ -53,11 +53,11 @@ RUN if [ "$VARIANT" = cosmic ]; then \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the desktop overlay checksums.
-ARG AGENTUX_CORE_VERSION=0.4.3
-ARG AGENTUX_DESKTOP_VERSION=0.5.3
-ARG AGENTUX_PLASMA_SHA256=979079519c911709dd8a57eea484c5ad0ad922b3683994d366f585cfaef039da
-ARG AGENTUX_COMMON_SHA256=20592e7877f4593742bd0ac2a807900ac242963939fa6ebb559f90a38ab6fc18
-ARG AGENTUX_COSMIC_SHA256=66d59ed691b72c50643deec5644570405904b0f0e007d1fe8aced4d306b6d977
+ARG AGENTUX_CORE_VERSION=0.4.4
+ARG AGENTUX_DESKTOP_VERSION=0.5.4
+ARG AGENTUX_PLASMA_SHA256=c2f8c123edca555ccccde55d15028702f26ced1a47f690ce84a9c36126c3b0b6
+ARG AGENTUX_COMMON_SHA256=0bf703b2cc493da78c4f9d3d3bbe762549a83918d1837e92f71928961f2ddec3
+ARG AGENTUX_COSMIC_SHA256=d6dda43f79a369ef4b4fde6ef5395a7be515c2f479da70350502daf8632f1484
 
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
 # cockpit RPM plus desktop overlays (usr/ and etc/, relative to /), checked
