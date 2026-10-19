@@ -26,10 +26,10 @@ env:
 jobs:
   contracts:
     name: desktop bundle contracts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Contract and atomic pin tests
@@ -75,7 +75,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Free disk space
         run: |
@@ -169,7 +169,7 @@ jobs:
           podman push --digestfile "$RUNNER_TEMP/digests/$ARCH" agentux:ci "docker://${IMAGE}:${stage}-${ARCH}"
           echo "pushed ${IMAGE}:${stage}-${ARCH}@$(cat "$RUNNER_TEMP/digests/$ARCH")"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: env.PUBLISH == 'true'
         with:
           name: digest-${{ matrix.variant }}-${{ matrix.arch }}
@@ -214,7 +214,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The policy check below pulls whole images, twice per architecture.
       - name: Free disk space
@@ -226,7 +226,7 @@ jobs:
           sudo docker image prune --all --force
           df -h / /mnt
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: digest-${{ matrix.variant }}-*
           path: ${{ runner.temp }}/digests
@@ -398,7 +398,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: COSMIC variant contract
         run: node tests/cosmic-contract.mjs

@@ -59,7 +59,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Hosted x64 runners have KVM, but /dev/kvm is root-only until this
       # rule (as documented by GitHub) opens it up.
@@ -172,7 +172,7 @@ jobs:
             echo "Boot test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && steps.kvm.outputs.ok == 'true'
         with:
           name: boot-test-${{ matrix.arch }}-${{ github.run_id }}

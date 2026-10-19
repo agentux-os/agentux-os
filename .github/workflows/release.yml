@@ -48,7 +48,7 @@ jobs:
       plasma: ${{ steps.digests.outputs.plasma }}
       cosmic: ${{ steps.digests.outputs.cosmic }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -170,7 +170,7 @@ jobs:
     env:
       OWNER: ${{ github.repository_owner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The publishing scripts come from main, not from the tag: they are
       # release tooling, not part of the released system, so a fix to them
@@ -210,7 +210,7 @@ jobs:
           .github/scripts/promote.sh "ghcr.io/$OWNER/agentux" "$PLASMA" "$GITHUB_REF_NAME" stable
           .github/scripts/promote.sh "ghcr.io/$OWNER/agentux-cosmic" "$COSMIC" "$GITHUB_REF_NAME" stable
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: agentux*-${{ github.ref_name }}-*
           path: ${{ runner.temp }}/isos
