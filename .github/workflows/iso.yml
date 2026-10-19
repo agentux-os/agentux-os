@@ -85,7 +85,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Images published before the multi-arch build are amd64 only. A pull
       # request (which builds from :latest) skips an architecture the image
@@ -193,7 +193,7 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "ISO \`$name.iso\` ($(du -h "$name.iso" | cut -f1)), installs \`$IMAGE\` and follows \`$TRACK_IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: steps.arch.outputs.ok == 'true'
         with:
           name: ${{ steps.iso.outputs.name }}
@@ -255,7 +255,7 @@ jobs:
             echo "The installer test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && steps.kvm.outputs.ok == 'true'
         with:
           name: iso-test-${{ matrix.arch }}-${{ github.run_id }}
@@ -291,10 +291,10 @@ jobs:
       contents: read
       actions: read # the ISO artifacts of this run
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: sigstore/cosign-installer@v4.1.2
       # This run's ISOs, as their jobs uploaded (and tested) them.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.ISO_PREFIX }}-2*
           path: ${{ runner.temp }}/isos

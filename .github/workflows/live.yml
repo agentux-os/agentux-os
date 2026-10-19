@@ -79,7 +79,7 @@ env:
 
 jobs:
   matrix:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       include: ${{ steps.matrix.outputs.include }}
     steps:
@@ -108,7 +108,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The channel the installed system follows (TRACK_IMAGE) and what the
       # live installer pulls (INSTALL_IMAGE): a release ISO installs the
@@ -196,7 +196,7 @@ jobs:
           sudo podman rmi --all --force >/dev/null || true
           df -h /
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.iso.outputs.name }}
           path: |
@@ -257,7 +257,7 @@ jobs:
             echo "The live test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always() && steps.kvm.outputs.ok == 'true'
         with:
           name: live-test-${{ matrix.arch }}-${{ github.run_id }}
@@ -286,7 +286,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Pick the channel
         env:
@@ -294,7 +294,7 @@ jobs:
         run: .github/scripts/channel.sh
 
       # This run's x86_64 ISO, as the live job built and tested it.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.ISO_PREFIX }}-*-x86_64
           path: ${{ runner.temp }}/iso
@@ -341,7 +341,7 @@ jobs:
             echo "The BIOS live test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: live-test-x86_64-bios-${{ github.run_id }}
@@ -375,10 +375,10 @@ jobs:
       contents: read
       actions: read # the ISO artifacts of this run
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: sigstore/cosign-installer@v4.1.2
       # This run's ISOs, as their jobs uploaded (and tested) them.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.ISO_PREFIX }}-2*
           path: ${{ runner.temp }}/isos
