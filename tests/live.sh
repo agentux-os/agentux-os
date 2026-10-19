@@ -104,12 +104,16 @@ wayland_session() {
     return 1
 }
 
-# The desktop a running process of the live user was started in
-# (XDG_CURRENT_DESKTOP from its environment).
+# The desktop the live user's session runs: XDG_CURRENT_DESKTOP from the
+# environment of the first of their processes that has it (cosmic-comp itself
+# is started before cosmic-session sets it, its clients carry it).
 process_desktop() {
-    local pid
-    pid="$(pgrep -u "$user" -x "$1" | head -n1)" || return 1
-    tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^XDG_CURRENT_DESKTOP=//p'
+    local pid desktop
+    for pid in $(pgrep -u "$user"); do
+        desktop="$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^XDG_CURRENT_DESKTOP=//p')"
+        [[ -n "$desktop" ]] && { echo "$desktop"; return 0; }
+    done
+    return 1
 }
 
 phase_session() {
@@ -150,7 +154,7 @@ phase_checks() {
         session_processes=(cosmic-session cosmic-comp)
         local desktop
         desktop="$(loginctl show-session "$session" -P Desktop 2>/dev/null)"
-        [[ -n "$desktop" ]] || desktop="$(process_desktop cosmic-comp)"
+        [[ -n "$desktop" ]] || desktop="$(process_desktop)"
         if [[ "${desktop,,}" == *cosmic* ]]; then
             ok "COSMIC is the active desktop session ($desktop)"
         else
