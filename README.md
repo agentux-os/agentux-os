@@ -40,11 +40,12 @@ This repository publishes the signed container images, installer ISOs and live I
 
 | Artifact | Current channel |
 |---|---|
-| Plasma image | [`ghcr.io/agentux-os/agentux:stable`](https://github.com/agentux-os/agentux/pkgs/container/agentux) |
-| COSMIC image (nightly) | [`ghcr.io/agentux-os/agentux-cosmic:latest`](https://github.com/agentux-os/agentux/pkgs/container/agentux-cosmic) |
-| Live ISO — Plasma | [`agentux-live-x86_64.iso`](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-live-aarch64.iso) |
-| Live ISO — COSMIC (nightly) | [`agentux-cosmic-live-x86_64.iso`](https://download.agentuxos.org/iso/nightly/agentux-cosmic-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/nightly/agentux-cosmic-live-aarch64.iso) |
-| Installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-aarch64.iso) |
+| KDE Plasma image | [`ghcr.io/agentux-os/agentux:stable`](https://github.com/agentux-os/agentux/pkgs/container/agentux) |
+| COSMIC image | [`ghcr.io/agentux-os/agentux-cosmic:stable`](https://github.com/agentux-os/agentux/pkgs/container/agentux-cosmic) |
+| KDE Plasma — live ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-plasma-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-plasma-live-aarch64.iso) |
+| KDE Plasma — offline installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-plasma-installer-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-plasma-installer-aarch64.iso) |
+| COSMIC — live ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-cosmic-live-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-cosmic-live-aarch64.iso) |
+| COSMIC — offline installer ISO | [`x86_64`](https://download.agentuxos.org/iso/stable/agentux-cosmic-installer-x86_64.iso) · [`aarch64`](https://download.agentuxos.org/iso/stable/agentux-cosmic-installer-aarch64.iso) |
 | Release metadata | [`latest.json`](https://download.agentuxos.org/latest.json) · [GitHub releases](https://github.com/agentux-os/agentux-os/releases/latest) |
 
 | Boot | Live desktop | Installer |
@@ -58,12 +59,12 @@ This repository publishes the signed container images, installer ISOs and live I
 **1. Try it live, without installing.** Download the live ISO, check it and write it to a USB stick (or attach it to a UEFI VM with 4 GB of RAM or more):
 
 ```sh
-curl -LO https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso
-curl -LO https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso.sha256
-sha256sum --check agentux-live-x86_64.iso.sha256
+curl -LO https://download.agentuxos.org/iso/stable/agentux-plasma-live-x86_64.iso
+curl -LO https://download.agentuxos.org/iso/stable/agentux-plasma-live-x86_64.iso.sha256
+sha256sum --check agentux-plasma-live-x86_64.iso.sha256
 ```
 
-It boots into the real desktop with a demo of fake agents, and an **Install AgentUX** launcher when you want to keep it ([Try it live](#try-it-live)). The nightly COSMIC live image is a separate download, `agentux-cosmic-live-<arch>.iso`; the stable Plasma live images are linked above. For 64-bit ARM, choose the matching `aarch64` image; for an offline installer, use `agentux-<arch>.iso` ([Install](#install), [Downloads](#downloads)). COSMIC is currently a live-only, nightly variant: the installer ISO workflow supports Plasma.
+It boots into the real desktop with a demo of fake agents, and an **Install AgentUX** launcher when you want to keep it ([Try it live](#try-it-live)). Every ISO is named `agentux-<desktop>-<live|installer>-<version>-<arch>.iso`: pick the desktop (`plasma` or `cosmic`), `live` to try it first (installing from it needs internet) or `installer` to install offline, and `x86_64` for PCs or `aarch64` for 64-bit ARM ([Install](#install), [Downloads](#downloads)).
 
 **2. Or switch an existing Fedora Atomic / bootc system:**
 
@@ -80,7 +81,7 @@ Use `:latest` instead of `:stable` for the nightly builds ([Release channels](#r
 ## Contents
 
 - **Use it:** [Variants](#variants) · [Architectures](#architectures) · [Release channels](#release-channels) · [Install](#install) · [Try it live](#try-it-live) · [Downloads](#downloads) · [Verifying the image](#verifying-the-image)
-- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Version](#version) · [Default wallpaper](#default-wallpaper) · [Hyprland (retired)](#hyprland-retired) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
+- **What's inside:** [What the image contains](#what-the-image-contains) · [Identity](#identity) · [Version](#version) · [Default wallpaper](#default-wallpaper) · [AgentUX versions](#agentux-versions) · [Boot splash](#boot-splash) · [GRUB menu](#grub-menu)
 - **Work on it:** [Build and test locally](#build-and-test-locally) · [Boot test](#boot-test) · [Live ISO test](#live-iso-test) · [Installer ISO test](#installer-iso-test) · [How a release reaches `:stable`](#how-a-release-reaches-stable) · [License](#license)
 
 Deep reference detail is folded away in collapsible sections; click a summary to expand it.
@@ -94,7 +95,7 @@ The one `Containerfile` builds two images, chosen by the build argument `VARIANT
 | `ghcr.io/agentux-os/agentux` | `plasma` (default) | KDE Plasma, the AgentUX defaults described below |
 | `ghcr.io/agentux-os/agentux-cosmic` | `cosmic` | Fedora COSMIC Atomic with AgentUX integration; no Plasma session or overlay |
 
-Both are multi-arch, signed and checked against the AgentUX key. Plasma is the stable-release variant; COSMIC is experimental and nightly-only until its install, architecture, signature and rollback gates pass, and switching to or from it is not yet a supported path. The Hyprland variant was retired after v0.5.9 ([Hyprland (retired)](#hyprland-retired)).
+Both are multi-arch, signed and checked against the AgentUX key. Both are released: each release ships a live and an offline installer ISO of each, for both architectures. Switching between Plasma and COSMIC with `bootc switch` is not a supported path yet: install the one you want.
 
 ## Architectures
 
@@ -111,7 +112,7 @@ Each image repository has two channels, and an installed system follows exactly 
 | `:latest` | **Nightly** (testing): `main`, rebuilt daily for Fedora's updates | Every day, and on every merge to `main` |
 | `:<YYYYMMDD>` | One nightly build | Never |
 
-Stable and nightly channels exist for Plasma. COSMIC is nightly-only (`:latest`) and receives no `:stable` promotion until its launch gates pass. Both repositories are multi-arch and require the same AgentUX image signature ([Verifying the image](#verifying-the-image)).
+Stable and nightly channels exist for both images. Both repositories are multi-arch and require the same AgentUX image signature ([Verifying the image](#verifying-the-image)).
 
 **Which channel a system follows** is the image reference in its origin, shown by `sudo bootc status`, and `bootc upgrade` pulls whatever that tag points at:
 
@@ -188,11 +189,11 @@ the future Quadlet bundle under the Command product's ownership.
 
 ### From the ISO
 
-The [Build ISO](https://github.com/agentux-os/agentux-os/actions/workflows/iso.yml) workflow turns an image (a release's, or the nightly `:latest`) into an Anaconda installer ISO per architecture with [bootc-image-builder](https://github.com/osbuild/image-builder/tree/main/bootc-image-builder), each built natively: `agentux-<version>-x86_64.iso` for PCs and `agentux-<version>-aarch64.iso` for 64-bit ARM UEFI machines. Download the one for your machine from **[download.agentuxos.org/iso/stable/](https://download.agentuxos.org/iso/stable/agentux-x86_64.iso)** (`agentux-x86_64.iso` or `agentux-aarch64.iso`) or a [release](https://github.com/agentux-os/agentux-os/releases), check it against the `.sha256` next to it (see [Downloads](#downloads)), and write it to a USB stick:
+The [Build ISO](https://github.com/agentux-os/agentux-os/actions/workflows/iso.yml) workflow turns an image (a release's, or the nightly `:latest`) into an Anaconda installer ISO per architecture with [bootc-image-builder](https://github.com/osbuild/image-builder/tree/main/bootc-image-builder), one per desktop and architecture, each built natively: `agentux-<desktop>-installer-<version>-<arch>.iso`, `x86_64` for PCs and `aarch64` for 64-bit ARM UEFI machines. Download the one for your machine from **[download.agentuxos.org/iso/stable/](https://download.agentuxos.org/iso/stable/)** (e.g. `agentux-plasma-installer-x86_64.iso`) or a [release](https://github.com/agentux-os/agentux-os/releases), check it against the `.sha256` next to it (see [Downloads](#downloads)), and write it to a USB stick:
 
 ```sh
 sha256sum -c agentux-*.iso.sha256
-sudo dd if=agentux-<date>-<arch>.iso of=/dev/sdX bs=4M status=progress oflag=sync
+sudo dd if=agentux-plasma-installer-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
 
 On ARM, boot the aarch64 ISO through the machine's UEFI firmware (or attach it as the CD of an aarch64 UEFI VM, e.g. UTM or Parallels on Apple silicon, or QEMU with `qemu-efi-aarch64`/`edk2-aarch64`).
@@ -214,7 +215,7 @@ The same command works on x86_64 and aarch64: the tag is a manifest list and boo
 
 ## Try it live
 
-The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download the newest release from **[download.agentuxos.org/iso/stable/agentux-live-x86_64.iso](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso)** ([`.sha256`](https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso.sha256)), a given one from the [releases](https://github.com/agentux-os/agentux-os/releases), or the newest weekly build from `iso/nightly/` (see [Downloads](#downloads)), check it against its `.sha256` (see [Downloads](#downloads)) and write it to a USB stick as above. Each run also keeps its ISO as an artifact for 14 days (`cosmic` builds `agentux-cosmic-live-…`, `arm64` an aarch64 ISO, which CI builds but cannot boot-test). It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
+The [Live ISO](https://github.com/agentux-os/agentux-os/actions/workflows/live.yml) workflow builds a live ISO: boot it from a USB stick or in a VM and AgentUX runs from RAM, without touching the disk, and installs from there when you want to keep it. Download the newest release from **[download.agentuxos.org/iso/stable/agentux-plasma-live-x86_64.iso](https://download.agentuxos.org/iso/stable/agentux-plasma-live-x86_64.iso)** ([`.sha256`](https://download.agentuxos.org/iso/stable/agentux-plasma-live-x86_64.iso.sha256)), a given one from the [releases](https://github.com/agentux-os/agentux-os/releases), or the newest weekly build from `iso/nightly/` (see [Downloads](#downloads)), check it against its `.sha256` (see [Downloads](#downloads)) and write it to a USB stick as above. Each run also keeps its ISO as an artifact for 14 days (`agentux-<desktop>-live-<date>-<arch>`; `arm64` an aarch64 ISO, which CI builds but cannot boot-test). It boots with UEFI (no legacy BIOS); give a VM at least 4 GB of RAM, 8 GB is comfortable.
 
 What you get:
 
@@ -245,10 +246,9 @@ ISOs are published on **download.agentuxos.org**, a Cloudflare R2 bucket: GitHub
 
 | Path | What | Installs and follows |
 |---|---|---|
-| `iso/stable/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest Plasma release | `:stable` |
+| `iso/stable/agentux-<desktop>-<live\|installer>-<arch>.iso` | The newest release: Plasma and COSMIC, live and installer, x86_64 and aarch64 | the desktop's `:stable` |
 | `iso/v<version>/…-v<version>-<arch>.iso` | Every release, kept; its [GitHub release](https://github.com/agentux-os/agentux-os/releases) carries the checksums and the links | `:stable` |
-| `iso/nightly/agentux-live-x86_64.iso`, `agentux-x86_64.iso`, `…-aarch64.iso` | The newest Plasma weekly build, or a run dispatched with **publish** from `main`; replaced each time | `:latest` |
-| `iso/nightly/agentux-cosmic-live-x86_64.iso`, `…-aarch64.iso` | COSMIC live ISO from a run dispatched with **publish** from `main`; replaced each time | `ghcr.io/agentux-os/agentux-cosmic:latest` |
+| `iso/nightly/agentux-<desktop>-<live\|installer>-<arch>.iso` | The newest weekly build (Plasma), or a run dispatched with **publish** from `main` (either desktop); replaced each time | the desktop's `:latest` |
 
 Releases are published by [`release.yml`](.github/workflows/release.yml) after the owner approves the tag (see [How a release reaches `:stable`](#how-a-release-reaches-stable)); the weekly builds by the `publish` job of [`iso.yml`](.github/workflows/iso.yml) and [`live.yml`](.github/workflows/live.yml). A nightly copy's `x-amz-meta-build` header names the dated build it came from.
 
@@ -257,8 +257,8 @@ R2 serves objects, not directories, so every directory has an `index.html` listi
 Next to every ISO is `<name>.iso.sha256` (naming the file next to it) and `<name>.iso.sha256.sigstore.json`, a cosign signature of the checksum with the key that signs the images:
 
 ```sh
-sha256sum --check agentux-live-x86_64.iso.sha256
-cosign verify-blob --key files/etc/pki/containers/agentux-os.pub   --bundle agentux-live-x86_64.iso.sha256.sigstore.json agentux-live-x86_64.iso.sha256
+sha256sum --check agentux-plasma-live-x86_64.iso.sha256
+cosign verify-blob --key files/etc/pki/containers/agentux-os.pub   --bundle agentux-plasma-live-x86_64.iso.sha256.sigstore.json agentux-plasma-live-x86_64.iso.sha256
 ```
 
 Every directory also has **`SHA256SUMS`**, the checksums of all its ISOs in one file, signed the same way (`SHA256SUMS.sigstore.json`). It is rebuilt from the directory's `.sha256` files after every upload (the ISOs of a directory come from separate jobs), so it always lists what is there:
@@ -275,21 +275,22 @@ sha256sum --check --ignore-missing SHA256SUMS
 
 ```json
 {
-  "version": "v0.5.5",
+  "version": "v0.6.0",
   "date": "2026-10-20T12:00:00Z",
   "channel": "stable",
-  "release_notes": "https://github.com/agentux-os/agentux-os/releases/tag/v0.5.5",
-  "sha256sums": "https://download.agentuxos.org/iso/v0.5.5/SHA256SUMS",
-  "sha256sums_signature": "https://download.agentuxos.org/iso/v0.5.5/SHA256SUMS.sigstore.json",
+  "release_notes": "https://github.com/agentux-os/agentux-os/releases/tag/v0.6.0",
+  "sha256sums": "https://download.agentuxos.org/iso/v0.6.0/SHA256SUMS",
+  "sha256sums_signature": "https://download.agentuxos.org/iso/v0.6.0/SHA256SUMS.sigstore.json",
   "public_key": "https://raw.githubusercontent.com/agentux-os/agentux-os/main/files/etc/pki/containers/agentux-os.pub",
   "images": {
-    "plasma": {"ref": "ghcr.io/agentux-os/agentux:v0.5.5", "channel": "ghcr.io/agentux-os/agentux:stable", "digest": "sha256:..."}
+    "plasma": {"ref": "ghcr.io/agentux-os/agentux:v0.6.0", "channel": "ghcr.io/agentux-os/agentux:stable", "digest": "sha256:..."},
+    "cosmic": {"ref": "ghcr.io/agentux-os/agentux-cosmic:v0.6.0", "channel": "ghcr.io/agentux-os/agentux-cosmic:stable", "digest": "sha256:..."}
   },
   "isos": [
     {
-      "name": "agentux-live-v0.5.5-x86_64.iso",
-      "url": "https://download.agentuxos.org/iso/v0.5.5/agentux-live-v0.5.5-x86_64.iso",
-      "stable_url": "https://download.agentuxos.org/iso/stable/agentux-live-x86_64.iso",
+      "name": "agentux-plasma-live-v0.6.0-x86_64.iso",
+      "url": "https://download.agentuxos.org/iso/v0.6.0/agentux-plasma-live-v0.6.0-x86_64.iso",
+      "stable_url": "https://download.agentuxos.org/iso/stable/agentux-plasma-live-x86_64.iso",
       "size": 3712345678,
       "sha256": "...",
       "arch": "x86_64",
@@ -432,14 +433,6 @@ plasma-setup's first-boot wizard does not follow the AgentUX theme: a Fedora pat
 Since the symlink belongs to `desktop-backgrounds-kde`, `rpm -V desktop-backgrounds-kde` reports `....L....  /usr/share/wallpapers/Default`; that is expected.
 
 </details>
-
-## Hyprland (retired)
-
-Up to v0.5.9 AgentUX also shipped `ghcr.io/agentux-os/agentux-hyprland`: the Plasma image plus a Hyprland session. It is no longer built or released; its last images stay in the registry, signed, and every AgentUX image keeps requiring the AgentUX signature for that repository. A system installed from it keeps working but gets no updates; move it to the Plasma image, which keeps the user's home and settings:
-
-```sh
-sudo bootc switch ghcr.io/agentux-os/agentux:stable
-```
 
 ## AgentUX versions
 

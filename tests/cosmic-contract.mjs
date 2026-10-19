@@ -49,6 +49,7 @@ assert.match(liveBuild, /agentux-cosmic\).*AgentUX-COSMIC-Live/, 'live builder a
 assert.match(liveBuild, /base_profile=.*fedora-kinoite.*agentux-cosmic.*base_profile=fedora/s, 'COSMIC Anaconda profile inherits generic Fedora defaults, not Kinoite defaults');
 assert.match(liveBuild, /livesys_session=cosmic/, 'COSMIC live image selects Fedora livesys COSMIC support');
 assert.match(liveSessionExtra, /agentux-live-demo\.desktop/, 'COSMIC session exposes the live demo affordance');
+assert.doesNotMatch(liveSessionExtra, /^\s*exit\b/m, 'livesys-main sources the session script: an exit would stop it before it hands /home/liveuser to the live user');
 assert.match(liveBuild, /if \[\[ "\$IMAGE_ID" != agentux-cosmic \]\]; then/, 'COSMIC live build skips Plasma-only widget setup');
 assert.match(liveBuild, /agentux-cosmic.*\$\{IMAGE_ID\}/s, 'COSMIC live build derives its exact repository from image identity');
 assert.match(liveTests, /agentux-cosmic/, 'live VM checks distinguish COSMIC from Plasma');
@@ -60,9 +61,8 @@ assert.match(liveVm, /agentux-cosmic:latest/, 'VM test fallback tracks the COSMI
 assert.match(liveVm, /qemu-img compare/, 'VM test proves the live session does not write to the install disk before install');
 assert.match(liveWorkflow, /options: \[plasma, cosmic\]/, 'manual live workflow offers COSMIC');
 assert.match(liveWorkflow, /agentux-cosmic/, 'live workflow maps COSMIC to its own image repository');
-assert.match(liveWorkflow, /agentux-cosmic-live/, 'COSMIC ISO has a distinct artifact prefix');
-assert.match(liveWorkflow, /COSMIC.*nightly|nightly.*COSMIC/s, 'live workflow labels COSMIC as nightly-only');
-assert.match(channelScript, /agentux-cosmic.*stable|stable.*agentux-cosmic/s, 'channel picker rejects stable COSMIC ISO builds');
+assert.match(liveWorkflow, /ISO_PREFIX: agentux-\$\{\{ inputs\.variant \|\| 'plasma' \}\}-live/, 'live ISOs are named agentux-<desktop>-live');
+assert.doesNotMatch(channelScript, /agentux-cosmic/, 'channel picker treats COSMIC like Plasma (stable ISOs allowed)');
 assert.match(buildWorkflow, /node tests\/cosmic-contract\.mjs/, 'CI runs the COSMIC variant contract test');
 assert.match(pullScript, /BASE_IMAGE/, 'base-image pull helper follows the parameterized Containerfile base');
 assert.match(containerfile, /transports\.docker\["ghcr\.io\/agentux-os\/agentux-cosmic"\]/, 'COSMIC repository requires the AgentUX image signature');
@@ -73,8 +73,7 @@ assert.doesNotMatch(buildWorkflow, /fedora-bootc@sha256/, 'COSMIC no longer uses
 assert.match(resolver, /quay\.io\/fedora-ostree-desktops\/cosmic-atomic/, 'COSMIC base resolver uses the upstream Atomic image');
 assert.match(resolver, /\.platform\.architecture == \$arch/, 'COSMIC base resolver selects the architecture-specific image digest');
 assert.match(resolver, /printf '%s@%s/, 'COSMIC base resolver returns an immutable digest reference');
-assert.match(releaseWorkflow, /for pair in plasma=agentux; do/, 'stable release candidate scope remains Plasma only');
-assert.doesNotMatch(releaseWorkflow, /agentux-cosmic/, 'stable release workflow does not promote COSMIC');
+assert.match(releaseWorkflow, /for pair in plasma=agentux cosmic=agentux-cosmic; do/, 'stable releases resolve Plasma and COSMIC');
+assert.match(releaseWorkflow, /promote\.sh "ghcr\.io\/\$OWNER\/agentux-cosmic" "\$COSMIC"/, 'stable releases promote COSMIC');
 assert.match(readme, /ghcr\.io\/agentux-os\/agentux-cosmic/, 'operator docs name the dedicated COSMIC image');
-assert.match(readme, /COSMIC.*nightly-only|nightly-only.*COSMIC/s, 'operator docs state the COSMIC stable-release gate');
 assert.match(readme, /agentux-cosmic.*sigstoreSigned|sigstoreSigned.*agentux-cosmic/s, 'operator docs explain COSMIC signature enforcement');

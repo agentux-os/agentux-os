@@ -24,14 +24,6 @@ case "$CHANNEL" in
     *) echo "::error::unknown channel '$CHANNEL' (stable or latest)"; exit 1 ;;
 esac
 
-# COSMIC is experimental/nightly-only until install, signatures, both
-# architectures, and rollback have passed the launch gate. Never let a
-# reusable workflow or tag accidentally build a stable COSMIC ISO.
-if [[ "$REPO" == */agentux-cosmic && ( "$CHANNEL" == stable || ${GITHUB_REF:-} == refs/tags/v* ) ]]; then
-    echo "::error::COSMIC Live is nightly-only; stable/release ISO builds are gated"
-    exit 1
-fi
-
 if [[ ${GITHUB_REF:-} == refs/tags/v* ]]; then
     if [[ $CHANNEL != stable || $IMAGE != "$REPO"@sha256:* ]]; then
         echo "::error::a release ISO must be built from a digest of $REPO and follow :stable (got $IMAGE, $CHANNEL)"

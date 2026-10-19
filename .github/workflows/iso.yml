@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       variant:
-        description: Image variant to build the installer from (plasma is ghcr.io/agentux-os/agentux)
+        description: Image variant to build the installer from (plasma is ghcr.io/agentux-os/agentux, cosmic is ghcr.io/agentux-os/agentux-cosmic)
         type: choice
-        options: [plasma]
+        options: [plasma, cosmic]
         default: plasma
       image:
         description: Image to build the installer from instead of the variant's :latest (e.g. a test-<sha> tag or a digest)
@@ -41,7 +41,7 @@ on:
       - .github/workflows/iso.yml
       - .github/scripts/pull.sh
       - .github/scripts/channel.sh
-      - disk_config/iso.toml
+      - disk_config/iso*.toml
       - installer/**
       - tests/iso-vm.sh
       - tests/installer-look.py
@@ -52,11 +52,15 @@ on:
 env:
   # What the ISO is built from: an explicit image (release.yml passes the
   # tag's digest), or the variant's :latest.
-  IMAGE: ${{ inputs.image || 'ghcr.io/agentux-os/agentux:latest' }}
-  REPO: ghcr.io/agentux-os/agentux
+  IMAGE: ${{ inputs.image || (inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
+  REPO: ${{ inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic' || 'ghcr.io/agentux-os/agentux' }}
   CHANNEL: ${{ inputs.channel || 'latest' }}
-  # The ISO's file name: agentux-<version>-<arch>.
-  ISO_PREFIX: agentux
+  # The ISO's file name: agentux-<desktop>-installer-<version>-<arch>, as
+  # the live ISOs are agentux-<desktop>-live-<version>-<arch>.
+  ISO_PREFIX: agentux-${{ inputs.variant || 'plasma' }}-installer
+  # COSMIC's installer turns on Fedora's Initial Setup for the account, as its
+  # live installer does; Plasma's account comes from plasma-setup.
+  ISO_CONFIG: disk_config/${{ inputs.variant == 'cosmic' && 'iso-cosmic' || 'iso' }}.toml
   BIB: quay.io/centos-bootc/bootc-image-builder:latest
 
 jobs:
@@ -148,7 +152,7 @@ jobs:
           mkdir -p output
           sudo podman run --rm --privileged \
             --security-opt label=type:unconfined_t \
-            -v ./disk_config/iso.toml:/config.toml:ro \
+            -v "./$ISO_CONFIG:/config.toml:ro" \
             -v ./output:/output \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             "$BIB" \

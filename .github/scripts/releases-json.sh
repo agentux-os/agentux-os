@@ -44,11 +44,20 @@ mapfile -t tags < <(
         | jq -r '.Tags[] | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+([-.+][0-9A-Za-z.-]+)?$"))' \
         | sort -rV
 )
-(( ${#tags[@]} > 0 )) || { echo "::error::no v* tags in ghcr.io/$owner/agentux"; exit 1; }
+# No release yet (the first one, or after the old ones were removed): an
+# empty list. A release always has its own tag here, as publish-iso.sh runs
+# this after the promotion.
+if (( ${#tags[@]} == 0 )); then
+    echo "::notice::no v* tags in ghcr.io/$owner/agentux yet; writing an empty release list"
+    jq -n --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{schema: 1, updated: $date, releases: []}' >"$out"
+    exit 0
+fi
 
 for tag in "${tags[@]}"; do
     images='{}'
     pairs=(plasma=agentux)
+    # COSMIC is released after v0.5.9, when Hyprland left.
+    [[ $tag != v0.5.9 && $(printf '%s\n' "$tag" v0.5.9 | sort -V | head -n1) == v0.5.9 ]] && pairs+=(cosmic=agentux-cosmic)
     # Hyprland shipped up to v0.5.9; older releases keep listing it, so the
     # systems still on it can name their version.
     [[ $(printf '%s\n' "$tag" v0.5.9 | sort -V | head -n1) == "$tag" ]] && pairs+=(hyprland=agentux-hyprland)

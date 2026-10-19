@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       variant:
-        description: Image variant (COSMIC is experimental and nightly-only)
+        description: Image variant
         type: choice
         options: [plasma, cosmic]
         default: plasma
@@ -69,8 +69,9 @@ env:
   IMAGE: ${{ inputs.image || (inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic:latest') || 'ghcr.io/agentux-os/agentux:latest' }}
   REPO: ${{ inputs.variant == 'cosmic' && 'ghcr.io/agentux-os/agentux-cosmic' || 'ghcr.io/agentux-os/agentux' }}
   CHANNEL: ${{ inputs.channel || 'latest' }}
-  # COSMIC has a distinct nightly artifact name; Plasma's stays unchanged.
-  ISO_PREFIX: ${{ inputs.variant == 'cosmic' && 'agentux-cosmic-live' || 'agentux-live' }}
+  # The ISO's file name: agentux-<desktop>-live-<version>-<arch>, as the
+  # installer ISOs are agentux-<desktop>-installer-<version>-<arch>.
+  ISO_PREFIX: agentux-${{ inputs.variant || 'plasma' }}-live
   LIVE_IMAGE: localhost/agentux-live:ci
   # ublue-os/titanoboa, pinned (main of 2026-05-19, "Only use container
   # images as the only source of truth"); its helper container too.

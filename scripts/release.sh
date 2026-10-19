@@ -26,7 +26,7 @@ fi
 commit="$(git rev-parse origin/main)"
 short="${commit:0:12}"
 
-for image in agentux; do
+for image in agentux agentux-cosmic; do
     token="$(curl -fsS "https://ghcr.io/token?scope=repository:agentux-os/$image:pull" |
         sed -E 's/.*"token":"([^"]+)".*/\1/')"
     code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
@@ -40,7 +40,7 @@ for image in agentux; do
 done
 
 echo "Release $tag of main at $(git log -1 --format='%h %s' "$commit")"
-echo "Image: ghcr.io/agentux-os/agentux:sha-$short (published)"
+echo "Images: ghcr.io/agentux-os/agentux:sha-$short, agentux-cosmic:sha-$short (both published)"
 if git describe --tags --abbrev=0 --match 'v*' "$commit" >/dev/null 2>&1; then
     prev="$(git describe --tags --abbrev=0 --match 'v*' "$commit")"
     echo "Changes since $prev:"

@@ -83,12 +83,35 @@ as_user() {
 }
 user_systemctl() { as_user systemctl --user "$@"; }
 
+# The live user's graphical session. Plasma's login manager registers it as
+# Type=wayland. COSMIC's greeter (greetd) starts cosmic-session from a
+# session logind records as a tty one, with no Desktop, so for COSMIC the
+# user's seat0 session counts once its compositor, cosmic-comp, runs.
 wayland_session() {
     local id
     for id in $(loginctl list-sessions --no-legend | awk -v u="$user" '$3 == u {print $1}'); do
         if [[ "$(loginctl show-session "$id" -P Type)" == wayland ]]; then
             echo "$id"; return 0
         fi
+    done
+    if "$is_cosmic" && pgrep -u "$user" -x cosmic-comp >/dev/null; then
+        for id in $(loginctl list-sessions --no-legend | awk -v u="$user" '$3 == u {print $1}'); do
+            if [[ "$(loginctl show-session "$id" -P Seat)" == seat0 ]]; then
+                echo "$id"; return 0
+            fi
+        done
+    fi
+    return 1
+}
+
+# The desktop the live user's session runs: XDG_CURRENT_DESKTOP from the
+# environment of the first of their processes that has it (cosmic-comp itself
+# is started before cosmic-session sets it, its clients carry it).
+process_desktop() {
+    local pid desktop
+    for pid in $(pgrep -u "$user"); do
+        desktop="$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^XDG_CURRENT_DESKTOP=//p')"
+        [[ -n "$desktop" ]] && { echo "$desktop"; return 0; }
     done
     return 1
 }
@@ -129,10 +152,27 @@ phase_checks() {
     mapfile -t session_processes < <(desktop_session_processes "$image_id")
     if "$is_cosmic"; then
         session_processes=(cosmic-session cosmic-comp)
-        if [[ "$(loginctl show-session "$session" -P Desktop)" == *cosmic* ]]; then
-            ok "COSMIC is the active desktop session"
+        local desktop
+        desktop="$(loginctl show-session "$session" -P Desktop 2>/dev/null)"
+        [[ -n "$desktop" ]] || desktop="$(process_desktop)"
+        if [[ "${desktop,,}" == *cosmic* ]]; then
+            ok "COSMIC is the active desktop session ($desktop)"
+        elif [[ -z "$desktop" ]] && pgrep -u "$user" -x cosmic-comp >/dev/null; then
+            # Neither logind nor the processes' environment name a desktop
+            # (greetd's session); COSMIC's compositor running it is the proof.
+            ok "COSMIC's compositor runs the session (no desktop name recorded)"
+            local pid
+            pid="$(pgrep -u "$user" -x cosmic-session | head -n1)"
+            [[ -n "$pid" ]] && tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -E '^(XDG_|DESKTOP_SESSION)' | indent
         else
-            bad "active desktop is not COSMIC ($(loginctl show-session "$session" -P Desktop))"
+            bad "active desktop is not COSMIC (${desktop:-none})"
+        fi
+        # COSMIC has no plasma-setup: its installs turn on Initial Setup to
+        # create the account at first boot.
+        if grep -qx 'firstboot --enable' /usr/share/agentux/live/install.ks; then
+            ok "COSMIC installer enables Initial Setup (firstboot --enable)"
+        else
+            bad "COSMIC installer lacks firstboot --enable"
         fi
     fi
     for proc in "${session_processes[@]}" agentux-cockpit; do
@@ -239,8 +279,10 @@ phase_checks() {
 }
 
 phase_approve() {
-    local request
-    request="$(as_user aux ps | awk '$2 == "run" { print $1; exit }')"
+    local request ps
+    # Not piped: awk's early exit would break aux's pipe while it still writes.
+    ps="$(as_user aux ps)"
+    request="$(awk '$2 == "run" { print $1; exit }' <<<"$ps")"
     if [[ -n "$request" ]] && as_user aux approve "$request" --message "approved by the live test"; then
         ok "approved demo request $request"
     else
@@ -363,7 +405,6 @@ phase_verify() {
         else
             bad "installed COSMIC session or Initial Setup backend missing"
         fi
-        if grep -qx 'firstboot --enable' /usr/share/agentux/live/install.ks; then ok "COSMIC installer enabled Initial Setup"; else bad "COSMIC installer lacks firstboot --enable"; fi
     fi
     if grep -q '^liveuser:' "$deploy/etc/passwd" 2>/dev/null; then bad "liveuser exists in the installed system"; else ok "no liveuser in the installed system"; fi
     if grep -q '^installtest:' "$deploy/etc/passwd" 2>/dev/null; then ok "the installer's user exists"; else warn "installtest user not found in the deployment's /etc/passwd"; fi
