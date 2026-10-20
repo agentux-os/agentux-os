@@ -17,6 +17,15 @@ install -m 0755 /usr/share/applications/agentux-live-install.desktop /home/liveu
 # system configured (COSMIC's compositor then cannot write its settings).
 if [ "${IMAGE_ID:-}" = agentux-cosmic ]; then
     install -m 0755 /usr/share/applications/agentux-live-demo.desktop /home/liveuser/Desktop/
+    # Fedora's livesys-cosmic writes its own dock into the live user's
+    # config (Fedora's installer first, then Fedora's apps), which hides
+    # AgentUX's default. Use AgentUX's dock with "Install AgentUX" first.
+    favorites=com.system76.CosmicAppList/v1/favorites
+    if [ -f "/usr/share/cosmic/$favorites" ]; then
+        mkdir -p "/home/liveuser/.config/cosmic/${favorites%/*}"
+        sed '0,/^\[/s//[\n    "agentux-live-install",/' "/usr/share/cosmic/$favorites" \
+            >"/home/liveuser/.config/cosmic/$favorites"
+    fi
 else
     if [ -f /home/liveuser/.config/kickoffrc ]; then
         sed -i 's|/usr/share/applications/liveinst.desktop|/usr/share/applications/agentux-live-install.desktop|' \
