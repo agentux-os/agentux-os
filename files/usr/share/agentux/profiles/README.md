@@ -21,7 +21,6 @@ file agentux-command's Quadlet reads; the profile creates its directory:
 
 ```sh
 sudo AGENTUX_COMMAND_IMAGE=... \
-  AGENTUX_COMMAND_CONFIG=/etc/agentux/command/config.env \
   agentux profile apply command
 ```
 
