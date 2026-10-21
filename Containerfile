@@ -19,6 +19,8 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://mise.jdx.dev
 
 # System toolchain. Fast-moving, per-user tools (agent CLIs, bun, lazygit,
 # ast-grep) are installed on first login instead; see files/usr/libexec.
+# libsecret: secret-tool, which keeps the agents' API keys in the desktop's
+# secret service (the cockpit's Settings) for agentuxd to hand them over.
 RUN dnf -y install \
         bat \
         distrobox \
@@ -28,6 +30,7 @@ RUN dnf -y install \
         git-delta \
         jq \
         just \
+        libsecret \
         mise \
         nodejs \
         npm \
