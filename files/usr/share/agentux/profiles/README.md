@@ -26,3 +26,7 @@ sudo AGENTUX_COMMAND_IMAGE=... \
 
 PostgreSQL, Temporal, NATS and object storage remain container services owned
 by `agentux-command`; they are never installed as OS packages.
+
+## Unattended machines
+
+`agentux-provision.service` sets a machine up on first boot from a provision file (profile, Command enrollment, node policy, agent preferences), found on the kernel command line (`agentux.provision=/path`), in QEMU's fw_cfg (`opt/org.agentux/provision`), on a filesystem labelled `AGENTUX`, or in `/boot` or `/etc/agentux/provision.yaml`. See `aux provision` in agentux-core's `docs/provision.md`.

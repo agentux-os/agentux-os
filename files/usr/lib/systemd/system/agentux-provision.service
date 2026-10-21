@@ -1,0 +1,20 @@
+[Unit]
+Description=Provision this machine from an AgentUX provision file
+Documentation=https://github.com/agentux-os/agentux-core/blob/main/docs/provision.md
+# Once: a provisioned machine keeps /var/lib/agentux/provisioned.json.
+ConditionPathExists=!/var/lib/agentux/provisioned.json
+# The profile it seeds is applied by agentux-profile-apply, after it; joining
+# Command needs the network.
+Before=agentux-profile-apply.service
+After=local-fs.target network-online.target systemd-user-sessions.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Only with an aux that can provision (agentux-core 0.4.9 and later).
+ExecCondition=/usr/bin/aux provision auto --help
+ExecStart=/usr/bin/aux provision auto
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

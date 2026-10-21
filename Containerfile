@@ -310,7 +310,7 @@ RUN chmod 0755 /usr/libexec/agentux/first-login \
     && grep -qx 'ConditionUser=!@system' /usr/lib/systemd/user/agentuxd.service \
     && test -x /usr/bin/nm-online \
     && systemctl --global enable agentux-first-login.service agentux-antigravity-acp.service agentuxd.service \
-    && systemctl enable agentux-profile-apply.service
+    && systemctl enable agentux-profile-apply.service agentux-provision.service
 
 LABEL org.opencontainers.image.title="AgentUX" \
       org.opencontainers.image.description="The Linux distribution where every coding agent works as one team" \
