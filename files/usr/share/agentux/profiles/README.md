@@ -16,11 +16,11 @@ Available profiles are `workstation`, `node`, `command`, `executive`,
 
 The `command` profile is intentionally fail-closed in this OS release. It
 needs an explicit Command image and configuration before any Quadlet material
-is written:
+is written. The configuration is `/var/lib/agentux/command/command.env`, the
+file agentux-command's Quadlet reads; the profile creates its directory:
 
 ```sh
 sudo AGENTUX_COMMAND_IMAGE=... \
-  AGENTUX_COMMAND_CONFIG=/etc/agentux/command/config.env \
   agentux profile apply command
 ```
 
