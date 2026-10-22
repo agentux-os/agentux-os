@@ -181,7 +181,7 @@ change it with `agentux profile apply <profile>`. The profiles are
 (guarded Command server capability), `executive` (Office client), `complete`,
 and `custom`. See the shipped [profile guide](files/usr/share/agentux/profiles/README.md).
 
-The Command profile never layers PostgreSQL, Temporal, NATS or object storage
+The Command profile never layers PostgreSQL, NATS or object storage
 into the immutable host. It requires explicit image/configuration and leaves
 the future Quadlet bundle under the Command product's ownership.
 

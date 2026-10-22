@@ -24,7 +24,7 @@ sudo AGENTUX_COMMAND_IMAGE=... \
   agentux profile apply command
 ```
 
-PostgreSQL, Temporal, NATS and object storage remain container services owned
+PostgreSQL, NATS and object storage remain container services owned
 by `agentux-command`; they are never installed as OS packages.
 
 ## Unattended machines
