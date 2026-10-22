@@ -1,0 +1,73 @@
+name: Tag the patch release
+
+# After a component bump (bump.yml) is merged and main's build of it is green,
+# so its sha-<commit> image exists, this pushes the next patch tag, which
+# starts release.yml; the release still waits for the owner's approval.
+#
+# Tags start releases, so the tag is pushed with the AGENTUX_RELEASE_TOKEN
+# secret only (a tag pushed with GITHUB_TOKEN would not start release.yml).
+# Without it, nothing is tagged: the run's summary gives the command.
+
+on:
+  workflow_run:
+    workflows: ["Build image"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: patch-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_commit.message, 'Bump agentux-core to ')
+    runs-on: ubuntu-24.04
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      HAS_TOKEN: ${{ secrets.AGENTUX_RELEASE_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          token: ${{ secrets.AGENTUX_RELEASE_TOKEN || github.token }}
+
+      - name: The next patch
+        id: next
+        run: |
+          if tags=$(git tag --points-at "$SHA" 'v*') && [[ -n "$tags" ]]; then
+            echo "$SHA is already tagged ($tags)." >> "$GITHUB_STEP_SUMMARY"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tag=$(.github/scripts/next-patch.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Push the tag
+        if: steps.next.outputs.tag != '' && env.HAS_TOKEN == 'true'
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          git config user.name "agentux-release-bot"
+          git config user.email "agentux-release-bot@users.noreply.github.com"
+          git tag -a "$TAG" "$SHA" -m "AgentUX $TAG" -m "$(git log -1 --format=%s "$SHA")"
+          git push origin "$TAG"
+          echo "Pushed $TAG at ${SHA::12}; release.yml now waits for the owner's approval." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Without a release token
+        if: steps.next.outputs.tag != '' && env.HAS_TOKEN != 'true'
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          {
+            echo "No AGENTUX_RELEASE_TOKEN secret: nothing was tagged. To release this patch:"
+            echo
+            echo '```sh'
+            echo "git fetch origin && git tag $TAG $SHA && git push origin $TAG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
