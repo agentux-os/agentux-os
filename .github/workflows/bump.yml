@@ -1,0 +1,126 @@
+name: Bump AgentUX components
+
+# A release of agentux-core or agentux-desktop reaches installed systems on
+# its own up to the owner's approval (ADR 0019 in agentux-os/agentux):
+#
+#   1. this workflow pins the latest component releases in the Containerfile
+#      (.github/scripts/bump-agentux.sh), writes the patch's release notes
+#      and opens the bump pull request, with auto-merge when the repository
+#      allows it;
+#   2. once main's build of the merge is green, patch-tag.yml pushes the next
+#      patch tag;
+#   3. release.yml builds the release and waits for the owner's approval.
+#
+# It runs every six hours, by hand, and when a component release sends a
+# `component-release` repository_dispatch.
+#
+# Pull requests opened with GITHUB_TOKEN do not start CI, so the bump is
+# opened with the AGENTUX_RELEASE_TOKEN secret when it exists (a fine-grained
+# token with contents and pull requests write on this repository). Without
+# it the pull request is opened anyway; close and reopen it to start CI.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [component-release]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-components
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.AGENTUX_RELEASE_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.AGENTUX_RELEASE_TOKEN || github.token }}
+
+      - name: Pin the latest component releases
+        run: .github/scripts/bump-agentux.sh
+
+      - name: What changed
+        id: changed
+        run: |
+          if git diff --quiet -- Containerfile; then
+            echo "The Containerfile already pins the latest agentux-core and agentux-desktop." >> "$GITHUB_STEP_SUMMARY"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          core=$(sed -n 's/^ARG AGENTUX_CORE_VERSION=//p' Containerfile)
+          desktop=$(sed -n 's/^ARG AGENTUX_DESKTOP_VERSION=//p' Containerfile)
+          old_core=$(git show HEAD:Containerfile | sed -n 's/^ARG AGENTUX_CORE_VERSION=//p')
+          old_desktop=$(git show HEAD:Containerfile | sed -n 's/^ARG AGENTUX_DESKTOP_VERSION=//p')
+          branch="bump/core-$core-desktop-$desktop"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "$branch already exists: its pull request is open or merged." >> "$GITHUB_STEP_SUMMARY"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "bump=true"
+            echo "core=$core"
+            echo "desktop=$desktop"
+            echo "old_core=$old_core"
+            echo "old_desktop=$old_desktop"
+            echo "branch=$branch"
+            echo "next=$(.github/scripts/next-patch.sh)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Release notes for the patch
+        if: steps.changed.outputs.bump == 'true'
+        env:
+          CORE: ${{ steps.changed.outputs.core }}
+          DESKTOP: ${{ steps.changed.outputs.desktop }}
+          OLD_CORE: ${{ steps.changed.outputs.old_core }}
+          OLD_DESKTOP: ${{ steps.changed.outputs.old_desktop }}
+          NEXT: ${{ steps.changed.outputs.next }}
+        run: |
+          notes="docs/releases/$NEXT.md"
+          if [[ -e "$notes" ]]; then
+            echo "$notes exists; left as it is." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "## Highlights"
+            echo
+            echo "A patch release with these AgentUX components:"
+            echo
+            [[ "$CORE" != "$OLD_CORE" ]] && echo "- **agentux-core $CORE** (was $OLD_CORE): [release notes](https://github.com/agentux-os/agentux-core/releases/tag/v$CORE)"
+            [[ "$DESKTOP" != "$OLD_DESKTOP" ]] && echo "- **agentux-desktop $DESKTOP** (was $OLD_DESKTOP): [release notes](https://github.com/agentux-os/agentux-desktop/releases/tag/v$DESKTOP)"
+            echo
+            echo "No new ISO needed: installed systems stage it in the background and use it after the next restart."
+          } > "$notes"
+
+      - name: Open the pull request
+        if: steps.changed.outputs.bump == 'true'
+        env:
+          CORE: ${{ steps.changed.outputs.core }}
+          DESKTOP: ${{ steps.changed.outputs.desktop }}
+          BRANCH: ${{ steps.changed.outputs.branch }}
+          NEXT: ${{ steps.changed.outputs.next }}
+        run: |
+          git config user.name "agentux-release-bot"
+          git config user.email "agentux-release-bot@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add Containerfile docs/releases
+          git commit -m "Bump agentux-core to $CORE and agentux-desktop to $DESKTOP" \
+            -m "Pinned by the bump workflow from the components' latest releases; the next patch release is $NEXT."
+          git push origin "$BRANCH"
+          url=$(gh pr create --base main --head "$BRANCH" \
+            --title "Bump agentux-core to $CORE and agentux-desktop to $DESKTOP" \
+            --body "Pins the latest component releases (\`.github/scripts/bump-agentux.sh\`) with their checksums, and adds \`docs/releases/$NEXT.md\`. Once main's build of the merge is green, \`patch-tag.yml\` pushes **$NEXT**, and the release waits for the owner's approval.")
+          echo "Opened $url" >> "$GITHUB_STEP_SUMMARY"
+          # Merges by itself once the required checks pass, where allowed.
+          gh pr merge "$url" --auto --squash 2>/dev/null \
+            && echo "Auto-merge is on." >> "$GITHUB_STEP_SUMMARY" \
+            || echo "Auto-merge is off for this repository: merge it once CI is green." >> "$GITHUB_STEP_SUMMARY"
