@@ -206,6 +206,9 @@ assert "About page: the base line (about-base, two lines)" \
 assert "kcm-about-distrorc runs both About scripts" \
     grep -qx 'ExtraSoftwareData=/usr/libexec/agentux/about-release;/usr/libexec/agentux/about-base' /etc/xdg/kcm-about-distrorc
 assert "agentux-releases.timer enabled" test -L /etc/systemd/system/timers.target.wants/agentux-releases.timer
+assert "agentux-update.timer enabled" test -L /etc/systemd/system/timers.target.wants/agentux-update.timer
+assert "updates never reboot by themselves" test ! -e /etc/systemd/system/timers.target.wants/bootc-fetch-apply-updates.timer
+assert "agentux-update.service stages only" sh -c '! grep -q -- --apply /usr/libexec/agentux/stage-update'
 # --refresh keeps only a valid release list, and keeps the old one otherwise.
 releases_dir="$(mktemp -d)"
 printf '{"schema": 1, "releases": [{"tag": "v0.0.1", "images": {"plasma": {"digest": "sha256:00"}}}]}\n' >"$releases_dir/good.json"

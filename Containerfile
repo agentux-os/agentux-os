@@ -188,6 +188,11 @@ RUN version="${AGENTUX_VERSION:-$(date -u +%Y.%m.%d)}" \
     && grep -qx "Fedora Linux $fedora.*" /tmp/about-base \
     && rm /tmp/about-base \
     && systemctl enable agentux-releases.timer \
+    && chmod 0755 /usr/libexec/agentux/stage-update \
+    && bash -n /usr/libexec/agentux/stage-update \
+    && systemctl enable agentux-update.timer \
+    && { systemctl disable bootc-fetch-apply-updates.timer 2>/dev/null || true; } \
+    && ! test -e /etc/systemd/system/timers.target.wants/bootc-fetch-apply-updates.timer \
     && cat /usr/lib/os-release /etc/system-release
 
 # Fedora's Default wallpaper is AgentUX's. plasma-setup's first-boot wizard

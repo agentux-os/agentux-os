@@ -1,0 +1,16 @@
+[Unit]
+Description=Stage the next AgentUX image for the next boot
+Documentation=https://github.com/agentux-os/agentux-os#updates
+# Downloads and stages only (bootc upgrade without --apply): nothing reboots;
+# the next boot, whenever the user chooses, runs the new image. Skipped on a
+# metered connection and on low battery (/usr/libexec/agentux/stage-update).
+Wants=network-online.target
+After=network-online.target agentux-releases.service
+ConditionKernelCommandLine=!rd.live.image
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/agentux/stage-update
+# A download is background work.
+Nice=10
+IOSchedulingClass=idle
