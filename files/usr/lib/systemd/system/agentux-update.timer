@@ -1,0 +1,15 @@
+[Unit]
+Description=Stage AgentUX updates daily, never reboot
+Documentation=https://github.com/agentux-os/agentux-os#updates
+
+[Timer]
+# Shortly after boot, then daily, spread out so machines do not all hit the
+# registry at once. `systemctl disable --now agentux-update.timer` turns
+# background updates off; `sudo bootc upgrade` still works by hand.
+OnBootSec=10min
+OnUnitActiveSec=1d
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

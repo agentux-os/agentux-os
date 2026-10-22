@@ -1,0 +1,106 @@
+#!/usr/bin/bash
+# stage-update: download and stage the next AgentUX image, never reboot
+# (agentux-update.service, daily; ADR 0019 in agentux-os/agentux).
+#
+# `bootc upgrade` without --apply only stages: the new image becomes the
+# default for the next boot, and the running system is untouched. It is
+# skipped on a metered connection and on battery below a threshold, so it
+# never costs data or charge the user did not expect.
+#
+# The outcome goes to /var/lib/agentux/update-status.json, readable by
+# everyone, for the cockpit's notice (agentux-desktop): the booted and staged
+# images (reference, digest, release name when known), when it ran, and why
+# it did not stage when it did not.
+#
+#   AGENTUX_UPDATE_MIN_BATTERY   percent below which nothing is staged on
+#                                battery (default 30)
+set -uo pipefail
+
+status_dir=/var/lib/agentux
+status_file="$status_dir/update-status.json"
+releases=/var/cache/agentux/releases.json
+min_battery="${AGENTUX_UPDATE_MIN_BATTERY:-30}"
+
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# The release a digest was published as, from the cached releases list.
+release_of() {
+    local digest=$1
+    [[ -n $digest && -r $releases ]] || return 0
+    jq -r --arg d "$digest" '
+        [.releases[] | select(any(.images[]?; .digest == $d or ((.manifests // {}) | any(.[]; . == $d)))) | .tag]
+        | first // empty' "$releases" 2>/dev/null
+}
+
+# Writes the status file from `bootc status --json` and an outcome.
+write_status() {
+    local result=$1 detail=${2:-} status booted_digest staged_digest
+    status="$(bootc status --json 2>/dev/null || echo '{}')"
+    booted_digest="$(jq -r '.status.booted.image.imageDigest // empty' <<<"$status" 2>/dev/null)"
+    staged_digest="$(jq -r '.status.staged.image.imageDigest // empty' <<<"$status" 2>/dev/null)"
+    mkdir -p "$status_dir"
+    local tmp
+    tmp="$(mktemp "$status_dir/.update-status.XXXXXX")" || return 1
+    jq -n --argjson status "$status" --arg result "$result" --arg detail "$detail" --arg checked "$(now)" \
+        --arg booted_release "$(release_of "$booted_digest")" --arg staged_release "$(release_of "$staged_digest")" '
+        def image($d; $release): if $d == null then null else {
+            image: ($d.image.image.image // null), digest: ($d.image.imageDigest // null),
+            version: ($d.image.version // null), release: (if $release == "" then null else $release end) } end;
+        { schema: 1, checkedAt: $checked, result: $result,
+          detail: (if $detail == "" then null else $detail end),
+          booted: image($status.status.booted; $booted_release),
+          staged: image($status.status.staged; $staged_release) }' >"$tmp" \
+        && chmod 0644 "$tmp" && mv -f "$tmp" "$status_file"
+    rm -f "$tmp"
+}
+
+# Metered per NetworkManager: 1 (yes) or 3 (guessed yes).
+metered() {
+    local value
+    value="$(busctl get-property org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+        org.freedesktop.NetworkManager Metered 2>/dev/null | awk '{print $2}')"
+    [[ $value == 1 || $value == 3 ]]
+}
+
+# On battery (no mains online) and below the threshold.
+low_battery() {
+    local supply online=0 battery=""
+    for supply in /sys/class/power_supply/*; do
+        [[ -r $supply/type ]] || continue
+        case "$(cat "$supply/type")" in
+            Mains | USB) [[ "$(cat "$supply/online" 2>/dev/null)" == 1 ]] && online=1 ;;
+            Battery) [[ -r $supply/capacity ]] && battery="$(cat "$supply/capacity")" ;;
+        esac
+    done
+    [[ $online == 0 && -n $battery && $battery -lt $min_battery ]]
+}
+
+if [[ $(id -u) != 0 ]]; then
+    echo "stage-update: run as root (agentux-update.service does)" >&2
+    exit 1
+fi
+if metered; then
+    write_status skipped "metered connection"
+    echo "stage-update: metered connection, not downloading"
+    exit 0
+fi
+if low_battery; then
+    write_status skipped "battery below ${min_battery}%"
+    echo "stage-update: on battery below ${min_battery}%, not downloading"
+    exit 0
+fi
+
+# Stage only: no --apply, so nothing reboots.
+if out="$(bootc upgrade 2>&1)"; then
+    if [[ "$(bootc status --json 2>/dev/null | jq -r '.status.staged // empty')" ]]; then
+        write_status staged
+        echo "stage-update: a new image is staged for the next boot"
+    else
+        write_status current
+        echo "stage-update: already up to date"
+    fi
+else
+    write_status failed "$(tail -n 3 <<<"$out")"
+    echo "stage-update: bootc upgrade failed: $out" >&2
+    exit 1
+fi

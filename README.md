@@ -119,6 +119,18 @@ Stable and nightly channels exist for both images. Both repositories are multi-a
 - Systems installed from a **release ISO** (`iso/stable/` or `iso/v<version>/` on download.agentuxos.org, or the links in a GitHub release) follow `:stable`.
 - Systems installed from a **nightly ISO** (`iso/nightly/`), and every system installed before the channels existed (all installs so far), follow `:latest`. Nothing moves them: they stay on the nightly channel until you switch.
 
+### Updates
+
+Installed systems update themselves in the background and **never reboot on their own** (ADR 0019 in agentux-os/agentux). `agentux-update.timer` runs [`stage-update`](files/usr/libexec/agentux/stage-update) ten minutes after boot and then daily: `bootc upgrade` without `--apply` downloads the channel's new image and stages it for the next boot, which happens whenever you restart. It does nothing on a metered connection, nor on battery below 30% (`AGENTUX_UPDATE_MIN_BATTERY`). Each run writes `/var/lib/agentux/update-status.json`, readable by everyone, with the booted and staged images (and their release names when known), so the cockpit can say an update is waiting.
+
+```sh
+sudo systemctl start agentux-update.service      # stage now
+cat /var/lib/agentux/update-status.json          # what is staged
+sudo systemctl disable --now agentux-update.timer  # no background updates; `sudo bootc upgrade` still works
+```
+
+`bootc-fetch-apply-updates.timer`, which reboots to apply, stays off.
+
 Switch channels at any time, either way:
 
 ```sh
