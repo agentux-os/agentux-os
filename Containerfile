@@ -74,21 +74,24 @@ RUN arch="$(uname -m)" \
     && case "$arch" in x86_64|aarch64) ;; *) echo "unsupported architecture $arch" >&2; exit 1 ;; esac \
     && core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTUX_CORE_VERSION}" \
     && desktop="https://github.com/agentux-os/agentux-desktop/releases/download/v${AGENTUX_DESKTOP_VERSION}" \
-    && rpms="/tmp/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm /tmp/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" -o "/tmp/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" -o "/tmp/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
+    && core_rpm="/tmp/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
+    && desktop_rpm="/tmp/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$core/$(basename "$core_rpm")" -o "$core_rpm" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$(basename "$desktop_rpm")" -o "$desktop_rpm" \
     && if [ -f /tmp/rpm-keys/RPM-GPG-KEY-agentux ]; then \
         install -D -m 0644 /tmp/rpm-keys/RPM-GPG-KEY-agentux /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
         && rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
-        && for rpm in $rpms; do \
-            rpm -K "$rpm" | grep -q 'signatures OK' \
-                || { echo "$rpm is not signed by the AgentUX RPM key" >&2; rpm -K -v "$rpm" >&2; exit 1; }; \
+        && for rpm in "$core_rpm" "$desktop_rpm"; do \
+            case "$(rpm -K "$rpm")" in \
+                *"signatures OK"*) ;; \
+                *) echo "$rpm is not signed by the AgentUX RPM key" >&2; rpm -K -v "$rpm" >&2; exit 1 ;; \
+            esac; \
         done; \
     else \
         echo "warning: no AgentUX RPM signing key in rpm-keys/: the AgentUX RPMs are not signature-checked" >&2; \
     fi \
-    && dnf -y install $rpms \
-    && rm -rf $rpms /tmp/rpm-keys \
+    && dnf -y install "$core_rpm" "$desktop_rpm" \
+    && rm -rf "$core_rpm" "$desktop_rpm" /tmp/rpm-keys \
     && dnf clean all \
     && test -n "$AGENTUX_COMMON_SHA256" \
     && common="agentux-desktop-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
