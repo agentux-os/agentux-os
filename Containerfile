@@ -62,6 +62,10 @@ ARG AGENTUX_PLASMA_SHA256=d0f7415703a805f32c07d65dc42a46e2dd9634383b7b82131e494e
 ARG AGENTUX_COMMON_SHA256=c16731b34e2a6a3ff753bcee68c3781e4e15051d9bb7bfa4aa53bc6357ddfc42
 ARG AGENTUX_COSMIC_SHA256=32b9006d56bd10c27248b8ab289b426e33e523147e0e92ff07df4a1c2ab7a131
 
+# The AgentUX RPM signing key (agentux-core docs/releasing.md), when it is
+# committed: every AgentUX RPM must then carry a valid signature by it.
+COPY rpm-keys/ /tmp/rpm-keys/
+
 # agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
 # cockpit RPM plus desktop overlays (usr/ and etc/, relative to /), checked
 # against pinned SHA-256 values before extraction. The common overlay is
@@ -70,9 +74,21 @@ RUN arch="$(uname -m)" \
     && case "$arch" in x86_64|aarch64) ;; *) echo "unsupported architecture $arch" >&2; exit 1 ;; esac \
     && core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTUX_CORE_VERSION}" \
     && desktop="https://github.com/agentux-os/agentux-desktop/releases/download/v${AGENTUX_DESKTOP_VERSION}" \
-    && dnf -y install \
-        "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
-        "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
+    && rpms="/tmp/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm /tmp/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$core/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" -o "/tmp/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" -o "/tmp/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
+    && if [ -f /tmp/rpm-keys/RPM-GPG-KEY-agentux ]; then \
+        install -D -m 0644 /tmp/rpm-keys/RPM-GPG-KEY-agentux /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
+        && rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
+        && for rpm in $rpms; do \
+            rpm -K "$rpm" | grep -q 'signatures OK' \
+                || { echo "$rpm is not signed by the AgentUX RPM key" >&2; rpm -K -v "$rpm" >&2; exit 1; }; \
+        done; \
+    else \
+        echo "warning: no AgentUX RPM signing key in rpm-keys/: the AgentUX RPMs are not signature-checked" >&2; \
+    fi \
+    && dnf -y install $rpms \
+    && rm -rf $rpms /tmp/rpm-keys \
     && dnf clean all \
     && test -n "$AGENTUX_COMMON_SHA256" \
     && common="agentux-desktop-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
