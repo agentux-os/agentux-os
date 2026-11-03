@@ -17,9 +17,13 @@ desktop=$(latest agentux-desktop)
 core_assets=$(gh release view "v$core" --repo agentux-os/agentux-core --json assets --jq '.assets[].name')
 desktop_assets=$(gh release view "v$desktop" --repo agentux-os/agentux-desktop --json assets --jq '.assets[].name')
 
+# AgentUX Office has its own version and ships in the desktop release.
+office=$(sed -n 's/^agentux-office-\([0-9][0-9A-Za-z.]*\)-1\.x86_64\.rpm$/\1/p' <<<"$desktop_assets" | head -n 1)
+[[ -n "$office" ]] || { echo "agentux-desktop v$desktop has no agentux-office RPM" >&2; exit 1; }
+
 required=()
 for arch in x86_64 aarch64; do
-    required+=("agentux-$core-1.fc44.$arch.rpm" "agentux-cockpit-$desktop-1.$arch.rpm")
+    required+=("agentux-$core-1.fc44.$arch.rpm" "agentux-cockpit-$desktop-1.$arch.rpm" "agentux-office-$office-1.$arch.rpm")
 done
 for bundle in common plasma cosmic; do
     archive="agentux-desktop-$bundle-$desktop.tar.gz"
@@ -56,6 +60,7 @@ cosmic_sha=$(checksum "agentux-desktop-cosmic-$desktop.tar.gz")
 declare -A values=(
     [AGENTUX_CORE_VERSION]="$core"
     [AGENTUX_DESKTOP_VERSION]="$desktop"
+    [AGENTUX_OFFICE_VERSION]="$office"
     [AGENTUX_COMMON_SHA256]="$common_sha"
     [AGENTUX_PLASMA_SHA256]="$plasma_sha"
     [AGENTUX_COSMIC_SHA256]="$cosmic_sha"
@@ -71,6 +76,7 @@ trap 'rm -f "$tmp"' EXIT
 sed \
     -e "s|^ARG AGENTUX_CORE_VERSION=.*|ARG AGENTUX_CORE_VERSION=$core|" \
     -e "s|^ARG AGENTUX_DESKTOP_VERSION=.*|ARG AGENTUX_DESKTOP_VERSION=$desktop|" \
+    -e "s|^ARG AGENTUX_OFFICE_VERSION=.*|ARG AGENTUX_OFFICE_VERSION=$office|" \
     -e "s|^ARG AGENTUX_COMMON_SHA256=.*|ARG AGENTUX_COMMON_SHA256=$common_sha|" \
     -e "s|^ARG AGENTUX_PLASMA_SHA256=.*|ARG AGENTUX_PLASMA_SHA256=$plasma_sha|" \
     -e "s|^ARG AGENTUX_COSMIC_SHA256=.*|ARG AGENTUX_COSMIC_SHA256=$cosmic_sha|" \
@@ -82,7 +88,7 @@ chmod --reference="$containerfile" "$tmp"
 mv -- "$tmp" "$containerfile"
 trap - EXIT
 
-echo "agentux-core $core, agentux-desktop $desktop (common/plasma/cosmic checksums verified)"
+echo "agentux-core $core, agentux-desktop $desktop, agentux-office $office (common/plasma/cosmic checksums verified)"
 if [[ "$containerfile" == "Containerfile" ]]; then
     git diff --stat -- "$containerfile"
 fi
