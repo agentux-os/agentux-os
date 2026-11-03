@@ -17,7 +17,7 @@ if [[ "$1 $2" == 'release view' ]]; then
         [[ "$asset" == "${MOCK_MISSING:-}" ]] || echo "$asset"
     done < <(
         for arch in x86_64 aarch64; do
-            printf 'agentux-0.4.3-1.fc44.%s.rpm\nagentux-cockpit-0.5.2-1.%s.rpm\n' "$arch" "$arch"
+            printf 'agentux-0.4.3-1.fc44.%s.rpm\nagentux-cockpit-0.5.2-1.%s.rpm\nagentux-office-0.1.1-1.%s.rpm\n' "$arch" "$arch" "$arch"
         done
         for bundle in common plasma cosmic; do
             printf 'agentux-desktop-%s-0.5.2.tar.gz\nagentux-desktop-%s-0.5.2.tar.gz.sha256\n' "$bundle" "$bundle"
@@ -42,6 +42,7 @@ chmod +x "$tmp/bin/gh"
 
 cat > "$tmp/Containerfile.template" <<'CONTAINERFILE'
 ARG AGENTUX_CORE_VERSION=0.4.2
+ARG AGENTUX_OFFICE_VERSION=0.1.0
 ARG AGENTUX_DESKTOP_VERSION=0.5.1
 ARG AGENTUX_COMMON_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ARG AGENTUX_PLASMA_SHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
@@ -57,6 +58,8 @@ assets=(
   agentux-desktop-cosmic-0.5.2.tar.gz.sha256
   agentux-cockpit-0.5.2-1.x86_64.rpm
   agentux-cockpit-0.5.2-1.aarch64.rpm
+  agentux-office-0.1.1-1.x86_64.rpm
+  agentux-office-0.1.1-1.aarch64.rpm
   agentux-0.4.3-1.fc44.x86_64.rpm
   agentux-0.4.3-1.fc44.aarch64.rpm
 )
@@ -75,5 +78,6 @@ cp "$tmp/Containerfile.template" "$tmp/Containerfile"
 PATH="$tmp/bin:$PATH" AGENTUX_CONTAINERFILE="$tmp/Containerfile" "$root/.github/scripts/bump-agentux.sh" >/dev/null
 grep -qx 'ARG AGENTUX_CORE_VERSION=0.4.3' "$tmp/Containerfile"
 grep -qx 'ARG AGENTUX_DESKTOP_VERSION=0.5.2' "$tmp/Containerfile"
+grep -qx 'ARG AGENTUX_OFFICE_VERSION=0.1.1' "$tmp/Containerfile"
 grep -qx 'ARG AGENTUX_COMMON_SHA256=0000000000000000000000000000000000000000000000000000000000000000' "$tmp/Containerfile"
 echo 'bump-agentux atomic preflight: OK'

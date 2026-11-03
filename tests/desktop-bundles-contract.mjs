@@ -27,6 +27,8 @@ for (const sumFile of ['/tmp/common.sha256', '/tmp/cosmic.sha256', '"/tmp/$plasm
   assert.ok(checkAt >= 0 && extractAt > checkAt, `${sumFile} is verified before archive extraction`);
 }
 assert.match(install, /agentux-cockpit-\$\{AGENTUX_DESKTOP_VERSION\}-1\.\$\{arch\}\.rpm/, 'Cockpit RPM stays independent of desktop overlay selection');
+assert.match(install, /agentux-office-\$\{AGENTUX_OFFICE_VERSION\}-1\.\$\{arch\}\.rpm/, 'AgentUX Office RPM is installed from the desktop release');
+assert.match(install, /dnf -y install "\$core_rpm" "\$desktop_rpm" "\$office_rpm"/, 'AgentUX Office is installed with the cockpit');
 assert.match(smoke, /shared setup backend is installed[\s\S]*shared setup catalog is installed/, 'smoke checks common setup files on every image');
 assert.match(smoke, /COSMIC image excludes Plasma-owned settings/, 'COSMIC smoke rejects Plasma configuration');
 assert.match(buildWorkflow, /node tests\/desktop-bundles-contract\.mjs[\s\S]*tests\/bump-agentux\.sh/, 'build CI runs image bundle and atomic pin contracts');

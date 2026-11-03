@@ -31,6 +31,6 @@
     "desktop": {"label": "Desktop cockpit", "providedBy": "agentux-desktop"},
     "node-gateway": {"label": "Remote node gateway", "providedBy": "agentux-os"},
     "command-server": {"label": "AgentUX Command server", "providedBy": "agentux-command"},
-    "office-client": {"label": "AgentUX Office web client", "providedBy": "agentux-apps"}
+    "office-client": {"label": "AgentUX Office", "providedBy": "agentux-desktop"}
   }
 }

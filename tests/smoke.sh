@@ -137,11 +137,12 @@ assert() {
         fail=1
     fi
 }
-for bin in aux agentuxd agentux-cockpit; do
+for bin in aux agentuxd agentux-cockpit agentux-office; do
     assert "/usr/bin/$bin" test -x "/usr/bin/$bin"
 done
 check 'aux --version'
 check 'agentuxd --version'
+assert "AgentUX Office menu entry is installed" test -f /usr/share/applications/agentux-office.desktop
 assert "shared setup backend is installed" test -x /usr/libexec/agentux-setup
 assert "shared setup catalog is installed" test -f /usr/share/agentux/setup/catalog.json
 assert "shared Flathub repository file is installed" test -f /usr/share/agentux/setup/flathub.flatpakrepo
