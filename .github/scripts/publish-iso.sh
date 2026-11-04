@@ -85,10 +85,32 @@ export AWS_DEFAULT_REGION=auto
 export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 # --only-show-errors is an option of cp, not of ls (which rejects it).
+#
+# R2 sometimes fails a multipart upload as a whole (CompleteMultipartUpload:
+# InvalidPart, v0.6.6's first re-run), which the AWS CLI does not retry; the
+# object it was replacing stays as it was. Copies are retried here.
+endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 s3() {
-    local quiet=(--only-show-errors)
+    local quiet=(--only-show-errors) attempt
     [[ $1 == ls ]] && quiet=()
-    aws s3 --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" "${quiet[@]}" "$@"
+    for attempt in 1 2 3 4; do
+        aws s3 --endpoint-url "$endpoint" "${quiet[@]}" "$@" && return 0
+        [[ $1 == ls ]] && return 1
+        echo "s3 $1: attempt $attempt failed, retrying" >&2
+        sleep $((attempt * 10))
+    done
+    return 1
+}
+# Whether the bucket already has KEY with exactly the size of FILE, and the
+# checksum file next to it says what FILE's does: a re-run of a release does
+# not upload its ISOs again.
+already_published() {
+    local key=$1 file=$2 size remote
+    size=$(aws s3api head-object --endpoint-url "$endpoint" --bucket "$bucket" --key "$key" \
+        --query ContentLength --output text 2>/dev/null) || return 1
+    [[ $size == "$(stat -c %s "$file")" ]] || return 1
+    remote=$(aws s3 --endpoint-url "$endpoint" cp "s3://$bucket/$key.sha256" - 2>/dev/null) || return 1
+    [[ $remote == "$(cat "$file.sha256")" ]]
 }
 # Files that are replaced (channel copies) are cached briefly; the ISOs
 # themselves are too large for Cloudflare's cache anyway.
@@ -136,8 +158,12 @@ for iso in "${isos[@]}"; do
 
     if [[ -n $versioned ]]; then
         sign "$name.iso.sha256"
-        s3 cp "$name.iso" "s3://$bucket/$versioned/$name.iso" \
-            --content-type application/x-iso9660-image --cache-control "$long"
+        if already_published "$versioned/$name.iso" "$name.iso"; then
+            echo "$versioned/$name.iso is already published, with the same checksum"
+        else
+            s3 cp "$name.iso" "s3://$bucket/$versioned/$name.iso" \
+                --content-type application/x-iso9660-image --cache-control "$long"
+        fi
         for f in "$name.iso.sha256" "$name.iso.sha256.sigstore.json"; do
             s3 cp "$f" "s3://$bucket/$versioned/$f" --content-type text/plain --cache-control "$long"
         done
