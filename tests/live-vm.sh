@@ -307,11 +307,31 @@ if [[ "${LIVE_TEST_VARIANT:-plasma}" == plasma ]]; then
     show_desktop
 fi
 
+# Showcase shots for the release page and the README (agentux-os#73):
+# no first-run windows (Plasma's Welcome Center, COSMIC's initial setup),
+# the cockpit in its screenshot window (agentux-cockpit --showcase: a fixed
+# size, centred, without the penguin's offer; an older cockpit just shows
+# its window), and the pointer pushed into the bottom-right corner.
+showcase_prepare() {
+    guest_cmd 30 'pkill -u liveuser -x plasma-welcome; pkill -u liveuser -f cosmic-initial-setup; true' \
+        >/dev/null || true
+    # shellcheck disable=SC2016 # expanded in the VM
+    guest_cmd 30 'uid=$(id -u liveuser); runuser -u liveuser -- env XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus systemd-run --user --unit=live-test-showcase --collect /usr/bin/agentux-cockpit --showcase' \
+        >/dev/null || echo "::warning::could not open the cockpit's showcase window"
+    python3 "$here/qga.py" qmp "$dir/qmp.sock" \
+        '{"execute": "input-send-event", "arguments": {"events": [{"type": "rel", "data": {"axis": "x", "value": 4000}}, {"type": "rel", "data": {"axis": "y", "value": 4000}}]}}' \
+        >/dev/null || echo "::warning::could not move the pointer out of the way"
+}
+showcase_prepare
+sleep 8
+screenshot showcase-board
+
 # The demo's waiting run, approved: the cockpit shows it move through the
 # pipeline.
 guest approve 120 | tee "$dir/live-approve.log" || true
 sleep 8
 screenshot 03-demo-running
+screenshot showcase-running
 sleep 30
 screenshot 04-demo-later
 

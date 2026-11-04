@@ -216,6 +216,23 @@ jobs:
           path: ${{ runner.temp }}/isos
           merge-multiple: true
 
+      # The screenshots the live tests took of this release, at fixed URLs
+      # (screenshots/stable/) for the README and the site. Missing ones
+      # warn; they never hold up a release.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: showcase-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/showcase
+        continue-on-error: true
+
+      - name: Publish the screenshots
+        continue-on-error: true
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: .github/scripts/publish-screenshots.sh "$RUNNER_TEMP/showcase"
+
       - name: Publish the ISOs and the GitHub release
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
