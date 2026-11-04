@@ -120,6 +120,33 @@ jobs:
             --tag agentux:ci .
           test "$(podman image inspect --format '{{.Architecture}}' agentux:ci)" = "${{ matrix.arch }}"
 
+      # Content-based layers (ADR 0019, agentux-os#75): rpm-ostree splits the
+      # built image by package and content, with normalized timestamps, so a
+      # file that did not change keeps its layer digest from one build to the
+      # next and an update downloads only the layers that did. It runs from
+      # the image itself (rpm-ostree and skopeo come with the base), with
+      # this runner's rootless storage as its own. The chunked image replaces
+      # agentux:ci, so it is the one tested, pushed and signed.
+      - name: Rechunk
+        run: |
+          start=$SECONDS
+          storage="$(podman info --format '{{.Store.GraphRoot}}')"
+          podman run --rm --privileged --security-opt label=disable \
+            -v "$storage:/var/lib/containers/storage" \
+            --entrypoint /usr/bin/rpm-ostree agentux:ci \
+            compose build-chunked-oci --bootc --format-version=1 \
+            --from localhost/agentux:ci --output containers-storage:localhost/agentux:chunked
+          for f in '{{.Architecture}}' '{{index .Labels "containers.bootc"}}' '{{index .Labels "io.github.agentux-os.variant"}}' '{{index .Labels "org.opencontainers.image.version"}}'; do
+            before="$(podman image inspect --format "$f" agentux:ci)"
+            after="$(podman image inspect --format "$f" agentux:chunked)"
+            test "$before" = "$after" || { echo "::error::rechunking changed $f: '$before' -> '$after'"; exit 1; }
+          done
+          layers="$(podman image inspect --format '{{len .RootFS.Layers}}' agentux:chunked)"
+          podman tag agentux:chunked agentux:ci
+          podman rmi agentux:chunked
+          podman image prune --force
+          echo "Rechunked into $layers layers in $((SECONDS - start))s." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Capture built image identity
         run: |
           image_id="$(podman image inspect --format '{{.Id}}' agentux:ci)"
