@@ -14,6 +14,20 @@ Available profiles are `workstation`, `node`, `command`, `executive`,
 `/var/lib/agentux/profile.json` and an installer seed is consumed from
 `/var/lib/agentux/profile-intent.json`.
 
+`custom` takes its components, checked against the catalog's `components`
+when the profile is seeded, so a wrong selection fails in setup rather than at
+first boot:
+
+```sh
+sudo agentux profile seed custom --components node,office-client
+agentux profile show    # "intent": the selection waiting for first boot
+```
+
+First boot applies exactly that set (`agentux profile apply-intent`), and
+applying it again changes nothing. A selection with `command-server` stays
+fail-closed like the `command` profile: the intent is kept until Command is
+configured.
+
 The `command` profile is intentionally fail-closed in this OS release. It
 needs an explicit Command image and configuration before any Quadlet material
 is written. The configuration is `/var/lib/agentux/command/command.env`, the

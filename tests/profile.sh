@@ -71,4 +71,46 @@ if bash "$here/files/usr/bin/agentux" profile apply workstation >/dev/null 2>&1;
     fi
 fi
 
+# Custom: the selection is checked when it is seeded, kept in the intent,
+# shown back to setup, and applied exactly, idempotently, on first boot.
+rm -f "$AGENTUX_PROFILE_STATE"
+if bash "$here/files/usr/bin/agentux" profile seed custom >/dev/null 2>&1; then
+    echo "custom seed without components was accepted" >&2
+    exit 1
+fi
+if bash "$here/files/usr/bin/agentux" profile seed custom --components node,warp-drive >/dev/null 2>&1; then
+    echo "custom seed with an unknown component was accepted" >&2
+    exit 1
+fi
+test ! -e "$tmp/state/profile-intent.json"
+if bash "$here/files/usr/bin/agentux" profile seed node --components node >/dev/null 2>&1; then
+    echo "components were accepted for a named profile" >&2
+    exit 1
+fi
+bash "$here/files/usr/bin/agentux" profile seed custom --components office-client,node
+jq -e '.profile == "custom" and .components == ["node","office-client"]' "$tmp/state/profile-intent.json" >/dev/null
+bash "$here/files/usr/bin/agentux" profile show \
+    | jq -e '.status == "unconfigured" and .intent == {profile:"custom",components:["node","office-client"]}' >/dev/null
+bash "$here/files/usr/bin/agentux" profile apply-intent >/dev/null
+test ! -e "$tmp/state/profile-intent.json"
+jq -e '.requested == "custom" and .status == "applied" and .applied == ["node","office-client"]' "$AGENTUX_PROFILE_STATE" >/dev/null
+bash "$here/files/usr/bin/agentux" profile show | jq -e 'has("intent") | not' >/dev/null
+before="$(sha256sum "$AGENTUX_PROFILE_STATE")"
+bash "$here/files/usr/bin/agentux" profile apply custom --components node,office-client >/dev/null
+test "$before" = "$(sha256sum "$AGENTUX_PROFILE_STATE")"
+
+# A named profile's intent carries no components.
+bash "$here/files/usr/bin/agentux" profile seed workstation
+jq -e 'has("components") | not' "$tmp/state/profile-intent.json" >/dev/null
+bash "$here/files/usr/bin/agentux" profile show | jq -e '.intent == {profile:"workstation",components:null}' >/dev/null
+
+# Command stays fail-closed inside a custom selection.
+bash "$here/files/usr/bin/agentux" profile seed custom --components node,command-server
+if bash "$here/files/usr/bin/agentux" profile apply-intent >/dev/null 2>&1; then
+    echo "unconfigured Command server was accepted in a custom profile" >&2
+    exit 1
+fi
+grep -q '"status":"failed"' "$AGENTUX_PROFILE_STATE"
+test -e "$tmp/state/profile-intent.json"
+
 echo "profile tests passed"
