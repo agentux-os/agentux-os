@@ -131,13 +131,17 @@ jobs:
         run: |
           start=$SECONDS
           # Mounted at its own path: podman's database records the graph
-          # root, and refuses the same storage under another one.
+          # root, and refuses the same storage under another one. In the
+          # image /home is a link to var/home, which does not exist yet, so a
+          # storage under /home is mounted where the link leads.
           storage="$(podman info --format '{{.Store.GraphRoot}}')"
+          case "$storage" in /home/*) target="/var$storage" ;; *) target="$storage" ;; esac
+          test "$(podman run --rm --entrypoint readlink agentux:ci /home)" = var/home
           driver="$(podman info --format '{{.Store.GraphDriverName}}')"
           printf '[storage]\ndriver = "%s"\ngraphroot = "%s"\nrunroot = "/run/containers/storage"\n' \
             "$driver" "$storage" > "$RUNNER_TEMP/storage.conf"
           podman run --rm --privileged --security-opt label=disable \
-            -v "$storage:$storage" \
+            -v "$storage:$target" \
             -v "$RUNNER_TEMP/storage.conf:/etc/containers/storage.conf:ro" \
             --entrypoint /usr/bin/rpm-ostree agentux:ci \
             compose build-chunked-oci --bootc --format-version=1 \
