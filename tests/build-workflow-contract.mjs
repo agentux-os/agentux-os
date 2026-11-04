@@ -16,6 +16,7 @@ assert.match(imageJob, /timeout-minutes: 90/, 'combined build and smoke job rema
 
 const orderedSteps = [
   'name: Build',
+  'name: Rechunk',
   'name: Capture built image identity',
   'name: First login and tool checks',
   'name: Installation profile contract',
@@ -25,6 +26,10 @@ const orderedSteps = [
 ].map((step) => imageJob.indexOf(step));
 assert.ok(orderedSteps.every((position) => position >= 0), 'build, smoke, identity, summary, and push steps all exist in image job');
 assert.ok(orderedSteps.every((position, index) => index === 0 || orderedSteps[index - 1] < position), 'image is built, tested, summarized, then pushed in order');
+
+const rechunk = imageJob.slice(imageJob.indexOf('      - name: Rechunk'), imageJob.indexOf('      - name: Capture built image identity'));
+assert.match(rechunk, /compose build-chunked-oci --bootc/, 'the image is rechunked into content-based layers (agentux-os#75)');
+assert.match(rechunk, /podman tag agentux:chunked agentux:ci/, 'the chunked image is the one tested and pushed');
 
 assert.match(imageJob, /image-id-before-tests/, 'built image identity is persisted before smoke checks');
 assert.match(imageJob, /podman image inspect --format '\{\{\.Id\}\}' agentux:ci/, 'image identity is inspected from the local CI tag');

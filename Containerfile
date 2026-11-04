@@ -53,74 +53,6 @@ RUN if [ "$VARIANT" = cosmic ]; then \
         test -x /usr/libexec/initial-setup/run-gui-backend || { echo "COSMIC Atomic base is missing Fedora Initial Setup GUI backend" >&2; exit 1; }; \
     fi
 
-# AgentUX itself, pinned to GitHub releases in this one place.
-# `just bump-agentux` moves the pins to the latest releases (pre-releases
-# included) and recomputes the desktop overlay checksums.
-ARG AGENTUX_CORE_VERSION=0.5.2
-ARG AGENTUX_OFFICE_VERSION=0.1.0
-ARG AGENTUX_DESKTOP_VERSION=0.5.13
-ARG AGENTUX_PLASMA_SHA256=4bdd9946bd558090c552da791f8fd711ccb13f707a48fd688726eda50b091d11
-ARG AGENTUX_COMMON_SHA256=4deac383e4425a154211003a264327b1c16963b30114cef6636fbe1ce25e9ec3
-ARG AGENTUX_COSMIC_SHA256=5788f5ffb07788cddf410fe412f792d088281462c4f011ec79bf8d014d7cba2d
-
-# The AgentUX RPM signing key (agentux-core docs/releasing.md), when it is
-# committed: every AgentUX RPM must then carry a valid signature by it.
-COPY rpm-keys/ /tmp/rpm-keys/
-
-# agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
-# cockpit and AgentUX Office RPMs (Office has its own version, released with
-# the desktop) plus desktop overlays (usr/ and etc/, relative to /), checked
-# against pinned SHA-256 values before extraction. The common overlay is
-# paired with either the Plasma or COSMIC desktop overlay.
-RUN arch="$(uname -m)" \
-    && case "$arch" in x86_64|aarch64) ;; *) echo "unsupported architecture $arch" >&2; exit 1 ;; esac \
-    && core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTUX_CORE_VERSION}" \
-    && desktop="https://github.com/agentux-os/agentux-desktop/releases/download/v${AGENTUX_DESKTOP_VERSION}" \
-    && core_rpm="/tmp/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
-    && desktop_rpm="/tmp/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
-    && office_rpm="/tmp/agentux-office-${AGENTUX_OFFICE_VERSION}-1.${arch}.rpm" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$core/$(basename "$core_rpm")" -o "$core_rpm" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$(basename "$desktop_rpm")" -o "$desktop_rpm" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$(basename "$office_rpm")" -o "$office_rpm" \
-    && if [ -f /tmp/rpm-keys/RPM-GPG-KEY-agentux ]; then \
-        install -D -m 0644 /tmp/rpm-keys/RPM-GPG-KEY-agentux /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
-        && rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
-        && for rpm in "$core_rpm" "$desktop_rpm" "$office_rpm"; do \
-            case "$(rpm -K "$rpm")" in \
-                *"signatures OK"*) ;; \
-                *) echo "$rpm is not signed by the AgentUX RPM key" >&2; rpm -K -v "$rpm" >&2; exit 1 ;; \
-            esac; \
-        done; \
-    else \
-        echo "warning: no AgentUX RPM signing key in rpm-keys/: the AgentUX RPMs are not signature-checked" >&2; \
-    fi \
-    && dnf -y install "$core_rpm" "$desktop_rpm" "$office_rpm" \
-    && rm -rf "$core_rpm" "$desktop_rpm" "$office_rpm" /tmp/rpm-keys \
-    && dnf clean all \
-    && test -n "$AGENTUX_COMMON_SHA256" \
-    && common="agentux-desktop-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$common" -o "/tmp/$common" \
-    && printf '%s  %s\n' "$AGENTUX_COMMON_SHA256" "/tmp/$common" > /tmp/common.sha256 \
-    && sha256sum --check --strict /tmp/common.sha256 \
-    && tar -xzf "/tmp/$common" -C / --no-same-owner --no-overwrite-dir \
-    && rm -f "/tmp/$common" /tmp/common.sha256 \
-    && if [ "$VARIANT" = cosmic ]; then \
-        test -n "$AGENTUX_COSMIC_SHA256" \
-        && cosmic="agentux-desktop-cosmic-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
-        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$cosmic" -o "/tmp/$cosmic" \
-        && printf '%s  %s\n' "$AGENTUX_COSMIC_SHA256" "/tmp/$cosmic" > /tmp/cosmic.sha256 \
-        && sha256sum --check --strict /tmp/cosmic.sha256 \
-        && tar -xzf "/tmp/$cosmic" -C / --no-same-owner --no-overwrite-dir \
-        && rm -f "/tmp/$cosmic" /tmp/cosmic.sha256; \
-    else \
-        plasma="agentux-desktop-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
-        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$plasma" -o "/tmp/$plasma" \
-        && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "/tmp/$plasma" > "/tmp/$plasma.sha256" \
-        && sha256sum --check --strict "/tmp/$plasma.sha256" \
-        && tar -xzf "/tmp/$plasma" -C / --no-same-owner --no-overwrite-dir \
-        && rm -f "/tmp/$plasma" "/tmp/$plasma.sha256"; \
-    fi
-
 COPY files/ /
 
 # Identity: the system calls itself AgentUX, with AgentUX's version, wherever
@@ -321,6 +253,82 @@ RUN jq --arg key /etc/pki/containers/agentux-os.pub \
     && jq -e '.default and .transports.docker["ghcr.io/agentux-os/agentux"] and .transports.docker["ghcr.io/agentux-os/agentux-hyprland"] and .transports.docker["ghcr.io/agentux-os/agentux-cosmic"]' /tmp/policy.json > /dev/null \
     && cat /tmp/policy.json > /etc/containers/policy.json \
     && rm /tmp/policy.json
+
+# Layer order (ADR 0019): what changes rarely comes first (the toolchain,
+# files/, wallpapers, the boot splash and initramfs, GRUB, the signature
+# policy), AgentUX's own packages, which move with every bump, last. The
+# initramfs takes nothing from them. (The identity step stays before the
+# initramfs: dracut copies os-release into it.) build.yml then rechunks the
+# image into content-based layers, so an update downloads only what changed.
+
+# AgentUX itself, pinned to GitHub releases in this one place.
+# `just bump-agentux` moves the pins to the latest releases (pre-releases
+# included) and recomputes the desktop overlay checksums.
+ARG AGENTUX_CORE_VERSION=0.5.2
+ARG AGENTUX_OFFICE_VERSION=0.1.0
+ARG AGENTUX_DESKTOP_VERSION=0.5.13
+ARG AGENTUX_PLASMA_SHA256=4bdd9946bd558090c552da791f8fd711ccb13f707a48fd688726eda50b091d11
+ARG AGENTUX_COMMON_SHA256=4deac383e4425a154211003a264327b1c16963b30114cef6636fbe1ce25e9ec3
+ARG AGENTUX_COSMIC_SHA256=5788f5ffb07788cddf410fe412f792d088281462c4f011ec79bf8d014d7cba2d
+
+# The AgentUX RPM signing key (agentux-core docs/releasing.md), when it is
+# committed: every AgentUX RPM must then carry a valid signature by it.
+COPY rpm-keys/ /tmp/rpm-keys/
+
+# agentux-core: aux, agentuxd and its systemd user unit. agentux-desktop: the
+# cockpit and AgentUX Office RPMs (Office has its own version, released with
+# the desktop) plus desktop overlays (usr/ and etc/, relative to /), checked
+# against pinned SHA-256 values before extraction. The common overlay is
+# paired with either the Plasma or COSMIC desktop overlay.
+RUN arch="$(uname -m)" \
+    && case "$arch" in x86_64|aarch64) ;; *) echo "unsupported architecture $arch" >&2; exit 1 ;; esac \
+    && core="https://github.com/agentux-os/agentux-core/releases/download/v${AGENTUX_CORE_VERSION}" \
+    && desktop="https://github.com/agentux-os/agentux-desktop/releases/download/v${AGENTUX_DESKTOP_VERSION}" \
+    && core_rpm="/tmp/agentux-${AGENTUX_CORE_VERSION}-1.fc44.${arch}.rpm" \
+    && desktop_rpm="/tmp/agentux-cockpit-${AGENTUX_DESKTOP_VERSION}-1.${arch}.rpm" \
+    && office_rpm="/tmp/agentux-office-${AGENTUX_OFFICE_VERSION}-1.${arch}.rpm" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$core/$(basename "$core_rpm")" -o "$core_rpm" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$(basename "$desktop_rpm")" -o "$desktop_rpm" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$(basename "$office_rpm")" -o "$office_rpm" \
+    && if [ -f /tmp/rpm-keys/RPM-GPG-KEY-agentux ]; then \
+        install -D -m 0644 /tmp/rpm-keys/RPM-GPG-KEY-agentux /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
+        && rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-agentux \
+        && for rpm in "$core_rpm" "$desktop_rpm" "$office_rpm"; do \
+            case "$(rpm -K "$rpm")" in \
+                *"signatures OK"*) ;; \
+                *) echo "$rpm is not signed by the AgentUX RPM key" >&2; rpm -K -v "$rpm" >&2; exit 1 ;; \
+            esac; \
+        done; \
+    else \
+        echo "warning: no AgentUX RPM signing key in rpm-keys/: the AgentUX RPMs are not signature-checked" >&2; \
+    fi \
+    && dnf -y install "$core_rpm" "$desktop_rpm" "$office_rpm" \
+    && gtk-update-icon-cache --force --quiet /usr/share/icons/hicolor \
+    && rm -rf "$core_rpm" "$desktop_rpm" "$office_rpm" /tmp/rpm-keys \
+    && dnf clean all \
+    && test -n "$AGENTUX_COMMON_SHA256" \
+    && common="agentux-desktop-common-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$common" -o "/tmp/$common" \
+    && printf '%s  %s\n' "$AGENTUX_COMMON_SHA256" "/tmp/$common" > /tmp/common.sha256 \
+    && sha256sum --check --strict /tmp/common.sha256 \
+    && tar -xzf "/tmp/$common" -C / --no-same-owner --no-overwrite-dir \
+    && rm -f "/tmp/$common" /tmp/common.sha256 \
+    && if [ "$VARIANT" = cosmic ]; then \
+        test -n "$AGENTUX_COSMIC_SHA256" \
+        && cosmic="agentux-desktop-cosmic-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$cosmic" -o "/tmp/$cosmic" \
+        && printf '%s  %s\n' "$AGENTUX_COSMIC_SHA256" "/tmp/$cosmic" > /tmp/cosmic.sha256 \
+        && sha256sum --check --strict /tmp/cosmic.sha256 \
+        && tar -xzf "/tmp/$cosmic" -C / --no-same-owner --no-overwrite-dir \
+        && rm -f "/tmp/$cosmic" /tmp/cosmic.sha256; \
+    else \
+        plasma="agentux-desktop-plasma-${AGENTUX_DESKTOP_VERSION}.tar.gz" \
+        && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$desktop/$plasma" -o "/tmp/$plasma" \
+        && printf '%s  %s\n' "$AGENTUX_PLASMA_SHA256" "/tmp/$plasma" > "/tmp/$plasma.sha256" \
+        && sha256sum --check --strict "/tmp/$plasma.sha256" \
+        && tar -xzf "/tmp/$plasma" -C / --no-same-owner --no-overwrite-dir \
+        && rm -f "/tmp/$plasma" "/tmp/$plasma.sha256"; \
+    fi
 
 # agentuxd runs as a user service for every user, like first-login. Fail the
 # build if the packaged unit ever points at a binary that isn't there, or
