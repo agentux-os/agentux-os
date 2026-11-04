@@ -56,12 +56,12 @@ RUN if [ "$VARIANT" = cosmic ]; then \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the desktop overlay checksums.
-ARG AGENTUX_CORE_VERSION=0.5.0
+ARG AGENTUX_CORE_VERSION=0.5.1
 ARG AGENTUX_OFFICE_VERSION=0.1.0
-ARG AGENTUX_DESKTOP_VERSION=0.5.12
-ARG AGENTUX_PLASMA_SHA256=ec29f78b36ca926b8ccdbdce9a7ce14737882d9e31e0e5532d500b77dd077ba7
-ARG AGENTUX_COMMON_SHA256=ae6376ef6fc6346cd3cacca21b8b901e5d85abe1866fa815b9cff9e41d32f1ce
-ARG AGENTUX_COSMIC_SHA256=3b00ebaa418945483c9dd74a95bf7f2c4a162479c534f7d5b425aa483c8393f9
+ARG AGENTUX_DESKTOP_VERSION=0.5.13
+ARG AGENTUX_PLASMA_SHA256=4bdd9946bd558090c552da791f8fd711ccb13f707a48fd688726eda50b091d11
+ARG AGENTUX_COMMON_SHA256=4deac383e4425a154211003a264327b1c16963b30114cef6636fbe1ce25e9ec3
+ARG AGENTUX_COSMIC_SHA256=5788f5ffb07788cddf410fe412f792d088281462c4f011ec79bf8d014d7cba2d
 
 # The AgentUX RPM signing key (agentux-core docs/releasing.md), when it is
 # committed: every AgentUX RPM must then carry a valid signature by it.
