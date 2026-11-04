@@ -130,9 +130,15 @@ jobs:
       - name: Rechunk
         run: |
           start=$SECONDS
+          # Mounted at its own path: podman's database records the graph
+          # root, and refuses the same storage under another one.
           storage="$(podman info --format '{{.Store.GraphRoot}}')"
+          driver="$(podman info --format '{{.Store.GraphDriverName}}')"
+          printf '[storage]\ndriver = "%s"\ngraphroot = "%s"\nrunroot = "/run/containers/storage"\n' \
+            "$driver" "$storage" > "$RUNNER_TEMP/storage.conf"
           podman run --rm --privileged --security-opt label=disable \
-            -v "$storage:/var/lib/containers/storage" \
+            -v "$storage:$storage" \
+            -v "$RUNNER_TEMP/storage.conf:/etc/containers/storage.conf:ro" \
             --entrypoint /usr/bin/rpm-ostree agentux:ci \
             compose build-chunked-oci --bootc --format-version=1 \
             --from localhost/agentux:ci --output containers-storage:localhost/agentux:chunked
