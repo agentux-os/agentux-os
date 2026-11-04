@@ -9,7 +9,7 @@ need_jq() { command -v jq >/dev/null 2>&1 || die "jq is required"; }
 usage() {
     cat >&2 <<'EOF'
 usage: agentux profile {show|plan|apply} PROFILE [--components a,b,...]
-       agentux profile seed PROFILE
+       agentux profile seed PROFILE [--components a,b,...]
        agentux profile apply-intent
        agentux profile remove COMPONENT
 EOF
@@ -28,6 +28,25 @@ write_state() {
         '{catalogVersion:$version,requested:(if $profile == "" then null else $profile end),status:$status,applied:$applied,pending:$pending,failed:$failed}' \
         >"$tmp"
     mv -f "$tmp" "$state"
+}
+
+# The components of PROFILE as a sorted JSON list: the catalog's, or for
+# custom the ones in COMPONENTS (a,b,...), each checked against the catalog.
+components_of() {
+    local profile="$1" components_arg="$2" components component
+    if [[ "$profile" == custom ]]; then
+        [[ -n "$components_arg" ]] || die "custom profile requires --components"
+        components="$(tr ',' '\n' <<<"$components_arg" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
+        [[ "$components" != '[]' ]] || die "custom profile requires --components"
+        while IFS= read -r component; do
+            jq -e --arg component "$component" '.components[$component]' "$catalog" >/dev/null \
+                || die "unknown component: $component"
+        done < <(jq -r '.[]' <<<"$components")
+    else
+        [[ -z "$components_arg" ]] || die "--components is only valid for custom"
+        components="$(jq -c --arg profile "$profile" '.profiles[$profile].components | unique' "$catalog")"
+    fi
+    printf '%s\n' "$components"
 }
 
 profile_cmd() {
@@ -51,29 +70,26 @@ profile_cmd() {
 
     case "$action" in
         show)
+            local shown intent
             if [[ -r "$state" ]]; then
-                jq -c . "$state"
+                shown="$(jq -c . "$state")"
             else
-                jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
-                    '{catalogVersion:$version,requested:null,status:"unconfigured",applied:[],pending:[],failed:[]}'
+                shown="$(jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
+                    '{catalogVersion:$version,requested:null,status:"unconfigured",applied:[],pending:[],failed:[]}')"
             fi
+            # The selection waiting for first boot, so setup can show it again.
+            intent="$(dirname "$state")/profile-intent.json"
+            if [[ -r "$intent" ]] && jq -e '.profile | type == "string"' "$intent" >/dev/null 2>&1; then
+                shown="$(jq -c --slurpfile intent "$intent" \
+                    '. + {intent: ($intent[0] | {profile, components: (.components // null)})}' <<<"$shown")"
+            fi
+            printf '%s\n' "$shown"
             ;;
         plan|apply)
             jq -e --arg profile "$value" '.profiles[$profile]' "$catalog" >/dev/null \
                 || die "unknown profile: $value"
             local components
-            if [[ "$value" == custom ]]; then
-                [[ -n "$components_arg" ]] || die "custom profile requires --components"
-                components="$(tr ',' '\n' <<<"$components_arg" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
-                while IFS= read -r component; do
-                    jq -e --arg component "$component" '.components[$component]' "$catalog" >/dev/null \
-                        || die "unknown component: $component"
-                done < <(jq -r '.[]' <<<"$components")
-            else
-                [[ -z "$components_arg" ]] || die "--components is only valid for custom"
-                components="$(jq -c --arg profile "$value" \
-                    '.profiles[$profile].components | unique' "$catalog")"
-            fi
+            components="$(components_of "$value" "$components_arg")" || exit 2
             jq -cn --arg profile "$value" --argjson components "$components" \
                 '{profile:$profile,components:$components}'
             if [[ "$action" == apply ]]; then
@@ -97,13 +113,16 @@ profile_cmd() {
         seed)
             jq -e --arg profile "$value" '.profiles[$profile]' "$catalog" >/dev/null \
                 || die "unknown profile: $value"
+            local intent tmp components
+            # Checked now, so a bad selection fails in setup, not at first boot.
+            components="$(components_of "$value" "$components_arg")" || exit 2
             mkdir -p "$(dirname "$state")"
-            local intent tmp
             intent="$(dirname "$state")/profile-intent.json"
             tmp="$(mktemp "${intent}.XXXXXX")"
             jq -cn --argjson version "$(jq '.catalogVersion' "$catalog")" \
-                --arg profile "$value" \
-                '{catalogVersion:$version,profile:$profile}' >"$tmp"
+                --arg profile "$value" --argjson components "$components" \
+                '{catalogVersion:$version,profile:$profile}
+                 + (if $profile == "custom" then {components:$components} else {} end)' >"$tmp"
             mv -f "$tmp" "$intent"
             ;;
         apply-intent)
@@ -111,7 +130,14 @@ profile_cmd() {
             intent="$(dirname "$state")/profile-intent.json"
             [[ -r "$intent" ]] || exit 0
             profile="$(jq -er '.profile' "$intent")" || die "invalid profile intent: $intent"
-            profile_cmd apply "$profile" >/dev/null
+            if [[ "$profile" == custom ]]; then
+                local selected
+                selected="$(jq -er '.components | if type == "array" and length > 0 then join(",") else error end' "$intent")" \
+                    || die "invalid profile intent: custom without components: $intent"
+                profile_cmd apply custom --components "$selected" >/dev/null
+            else
+                profile_cmd apply "$profile" >/dev/null
+            fi
             rm -f "$intent"
             ;;
         remove)
