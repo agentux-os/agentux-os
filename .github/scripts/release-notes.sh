@@ -12,7 +12,7 @@
 #   Changes     the PRs merged since the previous release, from GitHub's
 #               generated notes, grouped by their title's prefix (feat, fix,
 #               docs, ...) and credited to their authors.
-#   Components  the agentux-core and agentux-desktop versions pinned in the
+#   Components  the agentux-core, agentux-desktop and AgentUX Office versions pinned in the
 #               Containerfile, and the Fedora release the image is built on.
 #
 # Preview the notes of the next release before tagging it:
@@ -30,10 +30,23 @@ trap 'rm -rf "$work"' EXIT
 # a tag whose release was rejected or failed (v0.5.7) published nothing, so
 # v0.5.8's notes also list what v0.5.7 would have shipped. GitHub lists the
 # PRs merged in between as "* <title> by @<author> in <url>/pull/<n>".
-previous=$(gh release list -R "$repo" --exclude-drafts --limit 50 --json tagName     --jq "[.[].tagName | select(. != \"$tag\")][0] // empty")
+#
+# GitHub's API sometimes answers with an empty body ("unexpected end of JSON
+# input"), which failed v0.6.6's publish after its ISOs were up: each call is
+# retried a few times before the release gives up.
+retry() {
+    local attempt
+    for attempt in 1 2 3 4 5; do
+        "$@" && return 0
+        echo "release-notes: attempt $attempt failed: $*" >&2
+        sleep $((attempt * 5))
+    done
+    return 1
+}
+previous=$(retry gh release list -R "$repo" --exclude-drafts --limit 50 --json tagName --jq "[.[].tagName | select(. != \"$tag\")][0] // empty")
 args=(-f tag_name="$tag" -f target_commitish=main)
 [[ -n $previous ]] && args+=(-f previous_tag_name="$previous")
-gh api "repos/$repo/releases/generate-notes" "${args[@]}" --jq .body >"$work/body"
+retry gh api "repos/$repo/releases/generate-notes" "${args[@]}" --jq .body >"$work/body"
 
 # "<group>\t<title> (#<n>) by @<author>" for each PR, the conventional prefix
 # (feat:, fix(scope):, ...) moved into the group and the title capitalised.
@@ -100,6 +113,7 @@ fi
 
 core=$(sed -n 's/^ARG AGENTUX_CORE_VERSION=//p' "$root/Containerfile")
 desktop=$(sed -n 's/^ARG AGENTUX_DESKTOP_VERSION=//p' "$root/Containerfile")
+office=$(sed -n 's/^ARG AGENTUX_OFFICE_VERSION=//p' "$root/Containerfile")
 fedora=$(sed -n 's/^ARG FEDORA_VERSION=//p' "$root/Containerfile" | head -1)
 echo "## Components"
 echo
@@ -107,6 +121,7 @@ echo "| Component | Version |"
 echo "|---|---|"
 [[ -n $core ]] && echo "| agentux-core (\`aux\`, \`agentuxd\`) | [$core](https://github.com/agentux-os/agentux-core/releases/tag/v$core) |"
 [[ -n $desktop ]] && echo "| agentux-desktop (cockpit, Welcome) | [$desktop](https://github.com/agentux-os/agentux-desktop/releases/tag/v$desktop) |"
+[[ -n $office ]] && echo "| AgentUX Office (desktop app) | [$office](https://github.com/agentux-os/agentux-desktop/releases/tag/v$desktop) |"
 [[ -n $fedora ]] && echo "| Fedora Atomic base | $fedora |"
 echo
 [[ -n $full ]] && echo "**Full changelog**: $full" && echo
