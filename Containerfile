@@ -56,7 +56,7 @@ RUN if [ "$VARIANT" = cosmic ]; then \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the desktop overlay checksums.
-ARG AGENTUX_CORE_VERSION=0.5.1
+ARG AGENTUX_CORE_VERSION=0.5.2
 ARG AGENTUX_OFFICE_VERSION=0.1.0
 ARG AGENTUX_DESKTOP_VERSION=0.5.13
 ARG AGENTUX_PLASMA_SHA256=4bdd9946bd558090c552da791f8fd711ccb13f707a48fd688726eda50b091d11
