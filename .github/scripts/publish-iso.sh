@@ -268,7 +268,7 @@ ISOs are hosted on download.agentuxos.org (GitHub limits release files to 2 GiB)
 
 Every name says what it is: \`agentux-<desktop>-<live|installer>-<version>-<arch>.iso\`.
 
-The x86_64 ISOs were booted and their installed systems checked in a VM before this release was published: live ISOs from their live sessions and installer ISOs unattended. The aarch64 ISOs are built natively but not boot-tested: GitHub's arm64 runners have no KVM.
+The x86_64 ISOs were booted and their installed systems checked in a VM before this release was published: live ISOs from their live sessions and installer ISOs unattended. The aarch64 ISOs are built natively; GitHub's arm64 runners have no KVM, so CI does not boot them. The aarch64 live ISOs are booted by hand on ARM hardware before approval when the notes above have an *aarch64 live check*; the aarch64 installer ISOs are not boot-tested.
 
 The newest release's ISOs are always at \`$base/iso/stable/\`: the same names without the version (\`agentux-plasma-live-x86_64.iso\`, \`agentux-cosmic-installer-aarch64.iso\`, …).
 
