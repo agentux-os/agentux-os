@@ -264,12 +264,12 @@ RUN jq --arg key /etc/pki/containers/agentux-os.pub \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the desktop overlay checksums.
-ARG AGENTUX_CORE_VERSION=0.5.4
+ARG AGENTUX_CORE_VERSION=0.5.5
 ARG AGENTUX_OFFICE_VERSION=0.1.0
-ARG AGENTUX_DESKTOP_VERSION=0.5.15
-ARG AGENTUX_PLASMA_SHA256=096ac183f073d5fd3adfed5dfb2ca06f969c6b56daf0dc6f104ac24104d6967c
-ARG AGENTUX_COMMON_SHA256=63d54ea455dfbbd1757be371b1bc658eb9d9128c1a878bc617dbb7bd561fff37
-ARG AGENTUX_COSMIC_SHA256=c3e51d7f1efd255628d265e09287e4fdd7afd20deef58f83f21d7d9d9ef7e12b
+ARG AGENTUX_DESKTOP_VERSION=0.5.16
+ARG AGENTUX_PLASMA_SHA256=95826c0da01a6a3cb5fcbcd082a929e1fc5f03516fc2e56a0b7977eea1d6a5bd
+ARG AGENTUX_COMMON_SHA256=d4226308a70933943a82cd6e199f4ee57dcf4548a6e7494a21b50b964da9e30b
+ARG AGENTUX_COSMIC_SHA256=153d314b59cb5f224e373b951bbee54e72010e7e6351f0aa31e7fffed26c7e7d
 
 # The AgentUX RPM signing key (agentux-core docs/releasing.md), when it is
 # committed: every AgentUX RPM must then carry a valid signature by it.
