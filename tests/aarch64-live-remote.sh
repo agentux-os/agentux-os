@@ -6,13 +6,19 @@
 #
 #   aarch64-live-remote.sh [user@]host ISO [DIR]
 #
-# ISO is a local file, copied to the host, or an https URL the host downloads
-# itself; ISO.sha256 (next to the file, or at the URL) is checked when there
-# is one. The host needs /dev/kvm and Docker (its user in the `docker`
-# group): the test runs in an ubuntu:24.04 container, as on the CI runners,
-# so the host needs no QEMU or UEFI firmware of its own. Its work directory is
-# ~/agentux-aarch64-live. The summary and screenshots come back to DIR
-# (default: output/aarch64-live).
+# ISO is a local file, copied to the host; an https URL the host downloads
+# itself; or run:<run id>/<artifact>, an ISO artifact of an agentux-os
+# workflow run (a release's, before approval), which the host downloads
+# straight from GitHub with a short-lived link this machine gets with `gh`.
+# ISO.sha256 (next to the file, at the URL or in the artifact) is checked
+# when there is one.
+#
+# The host needs /dev/kvm and Docker (its user in the `docker` group): the
+# test runs in an ubuntu:24.04 container, as on the CI runners, so the host
+# needs no QEMU or UEFI firmware of its own. The download and the test run
+# there in the background, in ~/agentux-aarch64-live, and this script only
+# checks on them, so a dropped SSH connection doesn't stop them. The summary,
+# logs and screenshots come back to DIR (default: output/aarch64-live).
 #
 # The install test is off (LIVE_TEST_INSTALL=0): installing from the live
 # system runs in RAM and needs about 12 GB. LIVE_TEST_MEMORY (MiB, default
@@ -25,55 +31,126 @@ iso="${2:?usage: aarch64-live-remote.sh [user@]host ISO [DIR]}"
 dir="${3:-output/aarch64-live}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 work=agentux-aarch64-live
-name="$(basename "$iso")"
-ssh=(ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "$host")
+repo=agentux-os/agentux-os
+case "$iso" in
+    run:*/*)
+        run="${iso#run:}"
+        artifact="${run#*/}"
+        run="${run%%/*}"
+        name="$artifact.iso"
+        ;;
+    *) name="$(basename "$iso")" ;;
+esac
 # The desktop the ISO is for, from its name (agentux-<desktop>-live-...).
 case "$name" in
     agentux-cosmic-*) variant="${LIVE_TEST_VARIANT:-cosmic}" ;;
     *) variant="${LIVE_TEST_VARIANT:-plasma}" ;;
 esac
+ssh=(ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 "$host")
 
-"${ssh[@]}" "test -w /dev/kvm && docker info >/dev/null && [ \"\$(uname -m)\" = aarch64 ]" || {
+# Retries a short SSH command while the connection drops (exit 255).
+remote() {
+    local try rc
+    for try in 1 2 3 4 5 6; do
+        rc=0
+        "${ssh[@]}" "$@" || rc=$?
+        [[ $rc -ne 255 ]] && return "$rc"
+        echo "ssh to $host dropped; retrying ($try)" >&2
+        sleep 10
+    done
+    return 255
+}
+
+remote "test -w /dev/kvm && docker info >/dev/null && [ \"\$(uname -m)\" = aarch64 ]" || {
     echo "$host needs aarch64, a writable /dev/kvm and Docker" >&2
     exit 1
 }
-"${ssh[@]}" "mkdir -p $work/iso $work/repo && rm -rf $work/out"
+remote "test ! -e $work/status -a -e $work/job.sh" && {
+    echo "a test is still running on $host (~/$work/job.log); wait for it or remove ~/$work/job.sh" >&2
+    exit 1
+}
+remote "mkdir -p $work/iso $work/repo && rm -rf $work/out $work/status $work/job.sh $work/job.log"
 
 # The tests from this checkout, so a branch can be tried before it merges.
-tar -C "$here" -cf - tests | "${ssh[@]}" "rm -rf $work/repo/tests && tar -C $work/repo -xf -"
+tar -C "$here" -cf - tests | remote "rm -rf $work/repo/tests && tar -C $work/repo -xf -"
 
-if [[ "$iso" == https://* ]]; then
-    # A copy the checksum already matches isn't downloaded again.
-    "${ssh[@]}" "cd $work/iso && find . -type f ! -name '$name' ! -name '$name.sha256' -delete \
-        && { curl -fsSL -o '$name.sha256' '$iso.sha256' || rm -f '$name.sha256'; } \
-        && { [ -s '$name.sha256' ] && sha256sum --quiet -c '$name.sha256' 2>/dev/null \
-             || curl -fsSL -o '$name' '$iso'; }"
-else
-    [[ -f "$iso" ]] || { echo "no such ISO: $iso" >&2; exit 1; }
-    "${ssh[@]}" "rm -f $work/iso/*"
-    scp -q -o BatchMode=yes -o ServerAliveInterval=30 "$iso" "$host:$work/iso/$name"
-    if [[ -f "$iso.sha256" ]]; then
-        scp -q -o BatchMode=yes -o ServerAliveInterval=30 "$iso.sha256" "$host:$work/iso/$name.sha256"
-    fi
-fi
+# How the host gets the ISO, in the job below.
+case "$iso" in
+    run:*)
+        id="$(gh api "repos/$repo/actions/runs/$run/artifacts?per_page=100" \
+            -q ".artifacts[] | select(.name == \"$artifact\") | .id")"
+        [[ -n "$id" ]] || { echo "run $run has no artifact $artifact" >&2; exit 1; }
+        # The redirect to the artifact's storage, valid for about a minute:
+        # the job starts right away.
+        url="$(curl -fsS -o /dev/null -w '%{redirect_url}' \
+            -H "Authorization: Bearer $(gh auth token)" \
+            "https://api.github.com/repos/$repo/actions/artifacts/$id/zip")"
+        [[ -n "$url" ]] || { echo "no download link for artifact $id" >&2; exit 1; }
+        fetch="rm -f ./* && curl -fsSL -o artifact.zip '$url' && unzip -q -o artifact.zip && rm artifact.zip"
+        ;;
+    https://*)
+        # A copy the checksum already matches isn't downloaded again.
+        fetch="find . -type f ! -name '$name' ! -name '$name.sha256' -delete
+            { curl -fsSL -o '$name.sha256' '$iso.sha256' || rm -f '$name.sha256'; }
+            { [ -s '$name.sha256' ] && sha256sum --quiet -c '$name.sha256' 2>/dev/null; } \
+                || curl -fsSL -o '$name' '$iso'"
+        ;;
+    *)
+        [[ -f "$iso" ]] || { echo "no such ISO: $iso" >&2; exit 1; }
+        remote "rm -f $work/iso/*"
+        scp -q -o BatchMode=yes "$iso" "$host:$work/iso/$name"
+        if [[ -f "$iso.sha256" ]]; then
+            scp -q -o BatchMode=yes "$iso.sha256" "$host:$work/iso/$name.sha256"
+        fi
+        fetch=true
+        ;;
+esac
+
+# The job: get the ISO, check it, and test it in the container.
+remote "cat > $work/job.sh" <<EOF
+set -e
+cd ~/$work/iso
+$fetch
 # The checksum file names the ISO without its directory.
-"${ssh[@]}" "cd $work/iso && if [ -s '$name.sha256' ]; then sha256sum -c '$name.sha256'; else echo 'no $name.sha256; not checked'; fi"
+if [ -s '$name.sha256' ]; then sha256sum -c '$name.sha256'; else echo 'no $name.sha256; not checked'; fi
+cd ~/$work
+docker rm -f agentux-aarch64-live >/dev/null 2>&1 || true
+docker run --rm --name agentux-aarch64-live --device /dev/kvm \\
+    -v "\$PWD/repo:/repo:ro" -v "\$PWD/iso:/iso:ro" -v "\$PWD/out:/out" \\
+    -e OWNER="\$(id -u):\$(id -g)" -e LIVE_TEST_INSTALL=0 \\
+    -e LIVE_TEST_MEMORY=${LIVE_TEST_MEMORY:-5120} -e LIVE_TEST_CPUS=${LIVE_TEST_CPUS:-4} \\
+    -e LIVE_TEST_VARIANT=$variant \\
+    ubuntu:24.04 bash -c 'apt-get update -qq \\
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \\
+           qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu python3 >/dev/null \\
+        && { /repo/tests/live-vm.sh "/iso/$name" /out/live-test; rc=\$?; chown -R "\$OWNER" /out; exit \$rc; }'
+EOF
+remote "cd $work && setsid nohup bash -c 'bash job.sh; echo \$? > status' >job.log 2>&1 </dev/null &"
+echo "testing $name on $host (log: ~/$work/job.log)" >&2
 
-rc=0
-"${ssh[@]}" "docker rm -f agentux-aarch64-live >/dev/null 2>&1; cd $work && docker run --rm --name agentux-aarch64-live \
-    --device /dev/kvm -v \"\$PWD/repo:/repo:ro\" -v \"\$PWD/iso:/iso:ro\" -v \"\$PWD/out:/out\" \
-    -e OWNER=\"\$(id -u):\$(id -g)\" -e LIVE_TEST_INSTALL=0 -e LIVE_TEST_MEMORY=${LIVE_TEST_MEMORY:-5120} \
-    -e LIVE_TEST_CPUS=${LIVE_TEST_CPUS:-4} -e LIVE_TEST_VARIANT=$variant \
-    ubuntu:24.04 bash -c 'apt-get update -qq \
-        && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-           qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu python3 >/dev/null \
-        && /repo/tests/live-vm.sh \"/iso/$name\" /out/live-test; rc=\$?; \
-        chown -R \"\$OWNER\" /out; exit \$rc'" || rc=$?
+# Wait for it, for up to two hours.
+rc=""
+for _ in $(seq 1 240); do
+    sleep 30
+    if rc="$("${ssh[@]}" "cat $work/status 2>/dev/null")" && [[ -n "$rc" ]]; then
+        break
+    fi
+    rc=""
+done
+if [[ -z "$rc" ]]; then
+    echo "the test on $host has not finished after two hours; see ~/$work/job.log there" >&2
+    exit 1
+fi
 
 # Logs, screenshots and the summary; not the VM's disks or sockets.
 mkdir -p "$dir"
-"${ssh[@]}" "tar -C $work/out/live-test --exclude='*.qcow2' --exclude='*.sock' \
+remote "cat $work/job.log" >"$dir/job.log" || true
+remote "tar -C $work/out/live-test --exclude='*.qcow2' --exclude='*.sock' \
     --exclude=OVMF_VARS.fd --exclude=qemu.pid -cf - ." | tar -C "$dir" -xf - || true
-if [[ -f "$dir/summary.md" ]]; then cat "$dir/summary.md"; fi
+if [[ -f "$dir/summary.md" ]]; then
+    cat "$dir/summary.md"
+else
+    tail -20 "$dir/job.log" >&2
+fi
 echo "aarch64 live test of $name on $host: exit $rc; results in $dir" >&2
 exit "$rc"

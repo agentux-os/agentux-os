@@ -19,13 +19,14 @@ ARM host with KVM and Docker (a Raspberry Pi 4 with 8 GB is enough) with
 `tests/aarch64-live-remote.sh`:
 
 ```sh
-gh run download <release run id> -R agentux-os/agentux-os \
-    -n agentux-plasma-live-<tag>-aarch64 -D isos
-tests/aarch64-live-remote.sh user@arm-host isos/agentux-plasma-live-<tag>-aarch64.iso
+tests/aarch64-live-remote.sh user@arm-host run:<release run id>/agentux-plasma-live-<tag>-aarch64
+tests/aarch64-live-remote.sh user@arm-host run:<release run id>/agentux-cosmic-live-<tag>-aarch64
 ```
 
-Do the same for `agentux-cosmic-live-<tag>-aarch64`. An already published
-ISO can be given by its `https://download.agentuxos.org/...` URL instead.
+The host downloads each artifact straight from GitHub, and the test goes on
+there if the SSH connection drops. A local ISO file or an already published
+`https://download.agentuxos.org/...` URL works too.
+
 Paste each `summary.md` under `## aarch64 live check` in `<tag>.md`. The
 check covers the live session only: installing from the live system needs
 about 12 GB of RAM, and the aarch64 installer ISOs are still only built.
