@@ -257,6 +257,16 @@ jobs:
             echo "The live test did not get far enough to write a summary." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The release page's and the README's screenshots (release.yml
+      # publishes them); one desktop per artifact.
+      - uses: actions/upload-artifact@v7
+        if: steps.kvm.outputs.ok == 'true' && matrix.arch == 'x86_64'
+        with:
+          name: showcase-${{ inputs.variant || 'plasma' }}-${{ github.run_id }}
+          path: output/live-test/showcase-*.png
+          retention-days: 14
+          if-no-files-found: warn
+
       - uses: actions/upload-artifact@v7
         if: always() && steps.kvm.outputs.ok == 'true'
         with:

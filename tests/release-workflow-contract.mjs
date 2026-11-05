@@ -24,6 +24,12 @@ for (const [job, variant, image] of [
   assert.ok(block.includes(image), `${job} uses the ${variant} candidate digest`);
 }
 
+const shots = workflow.indexOf('      - name: Publish the screenshots');
+assert.ok(shots > 0 && shots < workflow.indexOf('      - name: Publish the ISOs and the GitHub release'),
+  'the release publishes the live tests\' screenshots (agentux-os#73)');
+assert.match(workflow.slice(shots, shots + 400), /continue-on-error: true/, 'missing screenshots never hold up a release');
+assert.match(workflow, /pattern: showcase-\*-\$\{\{ github\.run_id \}\}/, 'only this run\'s screenshots are published');
+
 assert.match(workflow, /needs: \[candidate, boot, iso-plasma, iso-cosmic, live-plasma, live-cosmic\]/,
   'publication waits for all tested Plasma and COSMIC ISO jobs');
 assert.doesNotMatch(workflow, /hyprland/i, 'the retired Hyprland variant is not released');
