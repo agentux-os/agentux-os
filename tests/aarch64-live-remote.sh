@@ -1,8 +1,7 @@
 #!/usr/bin/bash
-# Boot-tests an aarch64 live ISO on an ARM host with KVM, over SSH, with
-# tests/live-vm.sh. GitHub's arm64 runners have no KVM, so the aarch64 ISOs
-# are checked this way by hand before a release is approved (see
-# docs/releases/README.md).
+# Boots an aarch64 live ISO on an ARM host, over SSH, with tests/live-vm.sh.
+# GitHub's arm64 runners have no KVM, so the aarch64 ISOs are checked this
+# way by hand before a release is approved (see docs/releases/README.md).
 #
 #   aarch64-live-remote.sh [user@]host ISO [DIR]
 #
@@ -13,17 +12,21 @@
 # ISO.sha256 (next to the file, at the URL or in the artifact) is checked
 # when there is one.
 #
-# The host needs /dev/kvm and Docker (its user in the `docker` group): the
-# test runs in an ubuntu:24.04 container, as on the CI runners, so the host
-# needs no QEMU or UEFI firmware of its own. The download and the test run
-# there in the background, in ~/agentux-aarch64-live, and this script only
-# checks on them, so a dropped SSH connection doesn't stop them. The summary,
-# logs and screenshots come back to DIR (default: output/aarch64-live).
+# A Linux host needs /dev/kvm and Docker (its user in the `docker` group):
+# the test runs in an ubuntu:24.04 container, as on the CI runners, so the
+# host needs no QEMU or UEFI firmware of its own. An Apple Silicon Mac runs
+# it directly, with HVF and Homebrew's qemu and bash (`brew install qemu
+# bash`), kept awake while it runs. The download and the test run there in
+# the background, in ~/agentux-aarch64-live, and this script only checks on
+# them, so a dropped SSH connection doesn't stop them. The summary, logs and
+# screenshots come back to DIR (default: output/aarch64-live).
 #
-# The install test is off (LIVE_TEST_INSTALL=0): installing from the live
-# system runs in RAM and needs about 12 GB. LIVE_TEST_MEMORY (MiB, default
-# 5120), LIVE_TEST_CPUS (4) and LIVE_TEST_VARIANT (cosmic for an
-# agentux-cosmic-* ISO, else plasma) are passed on.
+# The install test is off by default (LIVE_TEST_INSTALL=0): installing from
+# the live system runs in RAM and needs about 12 GB, so turn it on with
+# LIVE_TEST_INSTALL=1 LIVE_TEST_MEMORY=12288 on a host with room for that.
+# LIVE_TEST_MEMORY (MiB, default 5120), LIVE_TEST_CPUS (4) and
+# LIVE_TEST_VARIANT (cosmic for an agentux-cosmic-* ISO, else plasma) are
+# passed on.
 set -euo pipefail
 
 host="${1:?usage: aarch64-live-remote.sh [user@]host ISO [DIR]}"
@@ -46,9 +49,12 @@ case "$name" in
     agentux-cosmic-*) variant="${LIVE_TEST_VARIANT:-cosmic}" ;;
     *) variant="${LIVE_TEST_VARIANT:-plasma}" ;;
 esac
+install="${LIVE_TEST_INSTALL:-0}"
+memory="${LIVE_TEST_MEMORY:-5120}" cpus="${LIVE_TEST_CPUS:-4}"
 ssh=(ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 "$host")
 
-# Retries a short SSH command while the connection drops (exit 255).
+# Retries a short SSH command while the connection drops (exit 255). The
+# commands keep to what both bash and zsh (a Mac's login shell) take.
 remote() {
     local try rc
     for try in 1 2 3 4 5 6; do
@@ -61,10 +67,18 @@ remote() {
     return 255
 }
 
-remote "test -w /dev/kvm && docker info >/dev/null && [ \"\$(uname -m)\" = aarch64 ]" || {
-    echo "$host needs aarch64, a writable /dev/kvm and Docker" >&2
-    exit 1
-}
+os="$(remote uname -s)"
+if [[ "$os" == Darwin ]]; then
+    remote "[ \"\$(uname -m)\" = arm64 ] && test -x /opt/homebrew/bin/qemu-system-aarch64 -a -x /opt/homebrew/bin/bash" || {
+        echo "$host needs Apple Silicon and Homebrew's qemu and bash (brew install qemu bash)" >&2
+        exit 1
+    }
+else
+    remote "test -w /dev/kvm && docker info >/dev/null && [ \"\$(uname -m)\" = aarch64 ]" || {
+        echo "$host needs aarch64, a writable /dev/kvm and Docker" >&2
+        exit 1
+    }
+fi
 remote "test ! -e $work/status -a -e $work/job.sh" && {
     echo "a test is still running on $host (~/$work/job.log); wait for it or remove ~/$work/job.sh" >&2
     exit 1
@@ -97,7 +111,7 @@ case "$iso" in
         ;;
     *)
         [[ -f "$iso" ]] || { echo "no such ISO: $iso" >&2; exit 1; }
-        remote "rm -f $work/iso/*"
+        remote "find $work/iso -type f -delete"
         scp -q -o BatchMode=yes "$iso" "$host:$work/iso/$name"
         if [[ -f "$iso.sha256" ]]; then
             scp -q -o BatchMode=yes "$iso.sha256" "$host:$work/iso/$name.sha256"
@@ -106,7 +120,25 @@ case "$iso" in
         ;;
 esac
 
-# The job: get the ISO, check it, and test it in the container.
+# The test itself: straight on a Mac, in a container elsewhere.
+if [[ "$os" == Darwin ]]; then
+    test="export PATH=/opt/homebrew/bin:\$PATH LIVE_TEST_INSTALL=$install LIVE_TEST_MEMORY=$memory \\
+    LIVE_TEST_CPUS=$cpus LIVE_TEST_VARIANT=$variant
+caffeinate -i bash repo/tests/live-vm.sh 'iso/$name' out/live-test"
+else
+    test="docker rm -f agentux-aarch64-live >/dev/null 2>&1 || true
+docker run --rm --name agentux-aarch64-live --device /dev/kvm \\
+    -v \"\$PWD/repo:/repo:ro\" -v \"\$PWD/iso:/iso:ro\" -v \"\$PWD/out:/out\" \\
+    -e OWNER=\"\$(id -u):\$(id -g)\" -e LIVE_TEST_INSTALL=$install \\
+    -e LIVE_TEST_MEMORY=$memory -e LIVE_TEST_CPUS=$cpus \\
+    -e LIVE_TEST_VARIANT=$variant \\
+    ubuntu:24.04 bash -c 'apt-get update -qq \\
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \\
+           qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu python3 >/dev/null \\
+        && { /repo/tests/live-vm.sh \"/iso/$name\" /out/live-test; rc=\$?; chown -R \"\$OWNER\" /out; exit \$rc; }'"
+fi
+
+# The job: get the ISO, check it, and test it.
 remote "cat > $work/job.sh" <<EOF
 set -e
 cd ~/$work/iso
@@ -114,18 +146,10 @@ $fetch
 # The checksum file names the ISO without its directory.
 if [ -s '$name.sha256' ]; then sha256sum -c '$name.sha256'; else echo 'no $name.sha256; not checked'; fi
 cd ~/$work
-docker rm -f agentux-aarch64-live >/dev/null 2>&1 || true
-docker run --rm --name agentux-aarch64-live --device /dev/kvm \\
-    -v "\$PWD/repo:/repo:ro" -v "\$PWD/iso:/iso:ro" -v "\$PWD/out:/out" \\
-    -e OWNER="\$(id -u):\$(id -g)" -e LIVE_TEST_INSTALL=0 \\
-    -e LIVE_TEST_MEMORY=${LIVE_TEST_MEMORY:-5120} -e LIVE_TEST_CPUS=${LIVE_TEST_CPUS:-4} \\
-    -e LIVE_TEST_VARIANT=$variant \\
-    ubuntu:24.04 bash -c 'apt-get update -qq \\
-        && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \\
-           qemu-system-arm qemu-utils qemu-efi-aarch64 ipxe-qemu python3 >/dev/null \\
-        && { /repo/tests/live-vm.sh "/iso/$name" /out/live-test; rc=\$?; chown -R "\$OWNER" /out; exit \$rc; }'
+$test
 EOF
-remote "cd $work && setsid nohup bash -c 'bash job.sh; echo \$? > status' >job.log 2>&1 </dev/null &"
+# setsid where there is one; a Mac has none, and nohup is enough there.
+remote "cd $work && \$(command -v setsid) nohup bash -c 'bash job.sh; echo \$? > status' >job.log 2>&1 </dev/null &"
 echo "testing $name on $host (log: ~/$work/job.log)" >&2
 
 # Wait for it, for up to two hours.

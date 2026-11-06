@@ -30,6 +30,8 @@
 # Logs, screenshots and summary.md go to DIR. Needs qemu-system-x86_64 (or
 # -aarch64) with KVM, UEFI firmware (ovmf / qemu-efi-aarch64; for
 # LIVE_TEST_FIRMWARE=bios, QEMU's default SeaBIOS), qemu-img and python3.
+# On an Apple Silicon Mac it runs the aarch64 ISOs with HVF instead of KVM,
+# with Homebrew's qemu (and its UEFI firmware) and bash.
 # LIVE_TEST_MEMORY (MiB, default 12288: the install from the live system
 # runs in RAM) and LIVE_TEST_CPUS (4) size the VM.
 set -euo pipefail
@@ -38,6 +40,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 iso="$(realpath "${1:?usage: live-vm.sh ISO DIR}")"
 dir="$(mkdir -p "${2:?usage: live-vm.sh ISO DIR}" && cd "$2" && pwd)"
 machine="$(uname -m)"
+[[ "$machine" == arm64 ]] && machine=aarch64
 system_rc=1 install_rc=skipped usb_rc=0
 firmware_mode="${LIVE_TEST_FIRMWARE:-uefi}"
 case "$firmware_mode" in
@@ -46,7 +49,12 @@ case "$firmware_mode" in
     *) echo "LIVE_TEST_FIRMWARE must be uefi or bios" >&2; exit 2 ;;
 esac
 
-if [[ "$machine" = aarch64 ]]; then
+if [[ "$(uname -s)" == Darwin ]]; then
+    share="$(brew --prefix qemu 2>/dev/null)/share/qemu"
+    # QEMU's own vars template for 32-bit ARM is the same blank 64 MiB store.
+    firmware=("$share/edk2-aarch64-code.fd:$share/edk2-arm-vars.fd")
+    qemu=qemu-system-aarch64 vm_machine=virt,accel=hvf display=virtio-gpu-pci,xres=1920,yres=1080
+elif [[ "$machine" = aarch64 ]]; then
     firmware=(/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd
               /usr/share/edk2/aarch64/QEMU_EFI-pflash.raw:/usr/share/edk2/aarch64/vars-template-pflash.raw)
     qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host display=virtio-gpu-pci,xres=1920,yres=1080
@@ -63,7 +71,7 @@ for pair in "${firmware[@]}"; do
     fi
 done
 [[ -n "$code" || "$firmware_mode" == bios ]] || { echo "UEFI firmware not found" >&2; exit 1; }
-[[ -w /dev/kvm ]] || { echo "/dev/kvm is not writable; KVM is required" >&2; exit 1; }
+[[ "$(uname -s)" == Darwin || -w /dev/kvm ]] || { echo "/dev/kvm is not writable; KVM is required" >&2; exit 1; }
 
 rm -rf "${dir:?}/boot" "${dir:?}/usb-boot" "${dir:?}/installed-boot"
 rm -f "$dir"/*.png "$dir"/*.log "$dir"/*.txt "$dir/summary.md" "$dir/summary.extra"
@@ -77,7 +85,7 @@ fi
 qemu-img create -q -f qcow2 "$dir/disk.qcow2" 64G
 # Snapshot the blank install target. Compare its guest-visible contents before
 # invoking the installer to catch accidental automount/setup writes in live.
-cp --reflink=auto "$dir/disk.qcow2" "$dir/disk-before-live.qcow2"
+cp "$dir/disk.qcow2" "$dir/disk-before-live.qcow2"
 
 # start_vm [cd|usb]: the VM, with the ISO as its CD or as a USB stick (the
 # ISO's bytes as a disk, as dd writes them; writes go to a throwaway
@@ -431,7 +439,7 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     else
         # The disk decides: an install that left a deployment finished,
         # whatever the guest could still report.
-        sed -i '/^FAIL anaconda failed (exit none)/d' "$dir/install.log"
+        sed -i.orig '/^FAIL anaconda failed (exit none)/d' "$dir/install.log" && rm "$dir/install.log.orig"
         echo "ok   AgentUX deployment on the disk" >>"$dir/install.log"
         summary_phase "Install from the live system" "$(grep -q '^FAIL ' "$dir/install.log" && echo 1 || echo 0)" "$dir/install.log"
         summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
