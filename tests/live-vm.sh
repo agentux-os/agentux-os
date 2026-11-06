@@ -111,6 +111,7 @@ start_vm() {
         -drive file="$dir/disk.qcow2",if=none,id=disk,format=qcow2 \
         -device virtio-blk-pci,drive=disk,bootindex=1 \
         -device "$display" -display none \
+        -device virtio-tablet-pci \
         -nic user,model=virtio-net-pci \
         -device virtio-rng-pci \
         -device virtio-serial-pci \
@@ -319,7 +320,10 @@ fi
 # no first-run windows (Plasma's Welcome Center, COSMIC's initial setup),
 # the cockpit in its screenshot window (agentux-cockpit --showcase: a fixed
 # size, centred, without the penguin's offer; an older cockpit just shows
-# its window), and the pointer pushed into the bottom-right corner.
+# its window), and the pointer pushed into the bottom-right corner: an
+# absolute move on the tablet (COSMIC kept the pointer top-left after the
+# PS/2 mouse's relative one), then the relative one for a guest that uses
+# only the mouse.
 showcase_prepare() {
     guest_cmd 30 'pkill -u liveuser -x plasma-welcome; pkill -u liveuser -f cosmic-initial-setup; true' \
         >/dev/null || true
@@ -327,7 +331,7 @@ showcase_prepare() {
     guest_cmd 30 'uid=$(id -u liveuser); runuser -u liveuser -- env XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus systemd-run --user --unit=live-test-showcase --collect /usr/bin/agentux-cockpit --showcase' \
         >/dev/null || echo "::warning::could not open the cockpit's showcase window"
     python3 "$here/qga.py" qmp "$dir/qmp.sock" \
-        '{"execute": "input-send-event", "arguments": {"events": [{"type": "rel", "data": {"axis": "x", "value": 4000}}, {"type": "rel", "data": {"axis": "y", "value": 4000}}]}}' \
+        '{"execute": "input-send-event", "arguments": {"events": [{"type": "abs", "data": {"axis": "x", "value": 32767}}, {"type": "abs", "data": {"axis": "y", "value": 32767}}, {"type": "rel", "data": {"axis": "x", "value": 4000}}, {"type": "rel", "data": {"axis": "y", "value": 4000}}]}}' \
         >/dev/null || echo "::warning::could not move the pointer out of the way"
 }
 showcase_prepare
