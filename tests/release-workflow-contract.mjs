@@ -54,3 +54,20 @@ assert.match(publisher, /gh release edit "\$tag"[\s\S]*?--notes-file "\$notes"/,
   'rerunning publication corrects an existing release title and description');
 assert.match(publisher, /The x86_64 ISOs were booted and their installed systems checked in a VM/,
   'release notes describe VM validation for the expanded ISO set');
+
+// A component bump's patch tag ships its images only (no ISOs).
+const patchTag = await readFile(resolve(root, '.github/workflows/patch-tag.yml'), 'utf8');
+assert.match(patchTag, /git tag -a "\$TAG" "\$SHA" [^\n]*-m "Release-ISOs: none"/, 'bump patch tags are marked images-only');
+assert.match(workflow, /grep -qx 'Release-ISOs: none'/, 'the release reads the images-only mark from the tag message');
+for (const job of ['iso-plasma', 'iso-cosmic', 'live-plasma', 'live-cosmic']) {
+  assert.ok(workflow.includes(`  ${job}:\n    needs: candidate\n    if: needs.candidate.outputs.isos == 'true'\n`),
+    `${job} is skipped for a release without ISOs`);
+}
+assert.match(workflow, /needs\.boot\.result == 'success'/, 'a release without ISOs still needs the boot test');
+assert.ok(workflow.includes("- name: Publish the ISOs and the GitHub release\n        if: needs.candidate.outputs.isos == 'true'"),
+  'ISOs are published only by releases that built them');
+assert.match(workflow, /if: needs\.candidate\.outputs\.isos != 'true'[\s\S]*publish-images-release\.sh/,
+  'a release without ISOs creates its GitHub release');
+const imagesRelease = await readFile(resolve(root, '.github/scripts/publish-images-release.sh'), 'utf8');
+assert.doesNotMatch(imagesRelease, /s3:\/\/\$bucket\/(latest\.json|iso\/)/, 'a release without ISOs leaves latest.json and iso/ alone');
+assert.match(imagesRelease, /releases-json\.sh/, 'a release without ISOs is listed in releases.json');

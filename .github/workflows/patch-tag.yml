@@ -2,7 +2,10 @@ name: Tag the patch release
 
 # After a component bump (bump.yml) is merged and main's build of it is green,
 # so its sha-<commit> image exists, this pushes the next patch tag, which
-# starts release.yml; the release still waits for the owner's approval.
+# starts release.yml; the release still waits for the owner's approval. The
+# tag says "Release-ISOs: none": a component bump ships its images only, and
+# installed systems get it with `bootc upgrade`. A tag pushed by hand (or one
+# without that line) builds and publishes the ISOs as well.
 #
 # Tags start releases, so the tag is pushed with the AGENTUX_RELEASE_TOKEN
 # secret only (a tag pushed with GITHUB_TOKEN would not start release.yml).
@@ -55,7 +58,7 @@ jobs:
         run: |
           git config user.name "agentux-release-bot"
           git config user.email "agentux-release-bot@users.noreply.github.com"
-          git tag -a "$TAG" "$SHA" -m "AgentUX $TAG" -m "$(git log -1 --format=%s "$SHA")"
+          git tag -a "$TAG" "$SHA" -m "AgentUX $TAG" -m "$(git log -1 --format=%s "$SHA")" -m "Release-ISOs: none"
           git push origin "$TAG"
           echo "Pushed $TAG at ${SHA::12}; release.yml now waits for the owner's approval." >> "$GITHUB_STEP_SUMMARY"
 
@@ -65,9 +68,9 @@ jobs:
           TAG: ${{ steps.next.outputs.tag }}
         run: |
           {
-            echo "No AGENTUX_RELEASE_TOKEN secret: nothing was tagged. To release this patch:"
+            echo "No AGENTUX_RELEASE_TOKEN secret: nothing was tagged. To release this patch (images only, no ISOs):"
             echo
             echo '```sh'
-            echo "git fetch origin && git tag $TAG $SHA && git push origin $TAG"
+            echo "git fetch origin && git tag -a $TAG $SHA -m 'AgentUX $TAG' -m 'Release-ISOs: none' && git push origin $TAG"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

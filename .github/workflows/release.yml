@@ -16,13 +16,17 @@ name: Release
 #                aarch64), agentux-<desktop>-<installer|live>-<tag>-<arch>,
 #                built from that desktop's digest and following its
 #                :stable; x86_64 ISOs are installed in a VM. ISOs are only
-#                built here.
+#                built here. A tag whose message has "Release-ISOs: none"
+#                (the patch tags patch-tag.yml pushes after a component
+#                bump) builds none: the release ships its images only.
 #   3. release   waits for the owner's approval (the `release` environment:
 #                v* tags only, wendelmax as required reviewer), then moves
 #                :<tag> and :stable to the digests, publishes the ISOs in
 #                iso/<tag>/ and iso/stable/ on download.agentuxos.org (with a
 #                signed SHA256SUMS in each), creates the GitHub release and
-#                points latest.json at it.
+#                points latest.json at it. A release without ISOs leaves
+#                iso/ and latest.json alone and creates the GitHub release
+#                (publish-images-release.sh).
 #
 # Approving is the last step, after every test of the tag passed; rejecting
 # it (or letting it time out) leaves :stable, the downloads and the releases
@@ -47,6 +51,7 @@ jobs:
     outputs:
       plasma: ${{ steps.digests.outputs.plasma }}
       cosmic: ${{ steps.digests.outputs.cosmic }}
+      isos: ${{ steps.isos.outputs.isos }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,6 +64,20 @@ jobs:
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main; tag a commit of main"
             exit 1
+          fi
+
+      # The tag's own message, from the annotated tag (checkout may leave a
+      # lightweight one in its place): a component bump's patch tag says
+      # "Release-ISOs: none", and its release ships images only.
+      - name: Whether the release builds ISOs
+        id: isos
+        run: |
+          git fetch --quiet --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" | grep -qx 'Release-ISOs: none'; then
+            echo "isos=false" >> "$GITHUB_OUTPUT"
+            echo "$GITHUB_REF_NAME says \`Release-ISOs: none\`: this release ships its images, no ISOs." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "isos=true" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: sigstore/cosign-installer@v4.1.2
@@ -101,6 +120,7 @@ jobs:
 
   iso-plasma:
     needs: candidate
+    if: needs.candidate.outputs.isos == 'true'
     uses: ./.github/workflows/iso.yml
     permissions:
       contents: read
@@ -114,6 +134,7 @@ jobs:
 
   iso-cosmic:
     needs: candidate
+    if: needs.candidate.outputs.isos == 'true'
     uses: ./.github/workflows/iso.yml
     permissions:
       contents: read
@@ -127,6 +148,7 @@ jobs:
 
   live-plasma:
     needs: candidate
+    if: needs.candidate.outputs.isos == 'true'
     uses: ./.github/workflows/live.yml
     permissions:
       contents: read
@@ -141,6 +163,7 @@ jobs:
 
   live-cosmic:
     needs: candidate
+    if: needs.candidate.outputs.isos == 'true'
     uses: ./.github/workflows/live.yml
     permissions:
       contents: read
@@ -158,6 +181,13 @@ jobs:
   # environment secrets, so only an approved v* tag run can publish.
   release:
     needs: [candidate, boot, iso-plasma, iso-cosmic, live-plasma, live-cosmic]
+    # The ISO jobs are skipped for a release without ISOs; otherwise all of
+    # them must have passed.
+    if: >-
+      !cancelled() && needs.boot.result == 'success' &&
+      (needs.candidate.outputs.isos != 'true' ||
+       (needs.iso-plasma.result == 'success' && needs.iso-cosmic.result == 'success' &&
+        needs.live-plasma.result == 'success' && needs.live-cosmic.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     environment:
@@ -186,6 +216,7 @@ jobs:
           git log -1 --format='publishing scripts from main at %h %s' FETCH_HEAD
 
       - name: Free disk space
+        if: needs.candidate.outputs.isos == 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
@@ -211,6 +242,7 @@ jobs:
           .github/scripts/promote.sh "ghcr.io/$OWNER/agentux-cosmic" "$COSMIC" "$GITHUB_REF_NAME" stable
 
       - uses: actions/download-artifact@v8
+        if: needs.candidate.outputs.isos == 'true'
         with:
           pattern: agentux*-${{ github.ref_name }}-*
           path: ${{ runner.temp }}/isos
@@ -220,12 +252,14 @@ jobs:
       # (screenshots/stable/) for the README and the site. Missing ones
       # warn; they never hold up a release.
       - uses: actions/download-artifact@v8
+        if: needs.candidate.outputs.isos == 'true'
         with:
           pattern: showcase-*-${{ github.run_id }}
           path: ${{ runner.temp }}/showcase
         continue-on-error: true
 
       - name: Publish the screenshots
+        if: needs.candidate.outputs.isos == 'true'
         continue-on-error: true
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -234,6 +268,7 @@ jobs:
         run: .github/scripts/publish-screenshots.sh "$RUNNER_TEMP/showcase"
 
       - name: Publish the ISOs and the GitHub release
+        if: needs.candidate.outputs.isos == 'true'
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -252,3 +287,16 @@ jobs:
           ls -lh "$RUNNER_TEMP/isos"
           echo "## Published" >> "$GITHUB_STEP_SUMMARY"
           .github/scripts/publish-iso.sh release "$RUNNER_TEMP/isos"
+
+      - name: Publish the GitHub release without ISOs
+        if: needs.candidate.outputs.isos != 'true'
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "## Published" >> "$GITHUB_STEP_SUMMARY"
+          .github/scripts/publish-images-release.sh
