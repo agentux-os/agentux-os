@@ -30,6 +30,8 @@
 # Logs, screenshots and summary.md go to DIR. Needs qemu-system-x86_64 (or
 # -aarch64) with KVM, UEFI firmware (ovmf / qemu-efi-aarch64; for
 # LIVE_TEST_FIRMWARE=bios, QEMU's default SeaBIOS), qemu-img and python3.
+# On an Apple Silicon Mac it runs the aarch64 ISOs with HVF instead of KVM,
+# with Homebrew's qemu (and its UEFI firmware) and bash.
 # LIVE_TEST_MEMORY (MiB, default 12288: the install from the live system
 # runs in RAM) and LIVE_TEST_CPUS (4) size the VM.
 set -euo pipefail
@@ -38,6 +40,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 iso="$(realpath "${1:?usage: live-vm.sh ISO DIR}")"
 dir="$(mkdir -p "${2:?usage: live-vm.sh ISO DIR}" && cd "$2" && pwd)"
 machine="$(uname -m)"
+[[ "$machine" == arm64 ]] && machine=aarch64
 system_rc=1 install_rc=skipped usb_rc=0
 firmware_mode="${LIVE_TEST_FIRMWARE:-uefi}"
 case "$firmware_mode" in
@@ -46,7 +49,12 @@ case "$firmware_mode" in
     *) echo "LIVE_TEST_FIRMWARE must be uefi or bios" >&2; exit 2 ;;
 esac
 
-if [[ "$machine" = aarch64 ]]; then
+if [[ "$(uname -s)" == Darwin ]]; then
+    share="$(brew --prefix qemu 2>/dev/null)/share/qemu"
+    # QEMU's own vars template for 32-bit ARM is the same blank 64 MiB store.
+    firmware=("$share/edk2-aarch64-code.fd:$share/edk2-arm-vars.fd")
+    qemu=qemu-system-aarch64 vm_machine=virt,accel=hvf display=virtio-gpu-pci,xres=1920,yres=1080
+elif [[ "$machine" = aarch64 ]]; then
     firmware=(/usr/share/AAVMF/AAVMF_CODE.fd:/usr/share/AAVMF/AAVMF_VARS.fd
               /usr/share/edk2/aarch64/QEMU_EFI-pflash.raw:/usr/share/edk2/aarch64/vars-template-pflash.raw)
     qemu=qemu-system-aarch64 vm_machine=virt,accel=kvm,gic-version=host display=virtio-gpu-pci,xres=1920,yres=1080
@@ -63,7 +71,7 @@ for pair in "${firmware[@]}"; do
     fi
 done
 [[ -n "$code" || "$firmware_mode" == bios ]] || { echo "UEFI firmware not found" >&2; exit 1; }
-[[ -w /dev/kvm ]] || { echo "/dev/kvm is not writable; KVM is required" >&2; exit 1; }
+[[ "$(uname -s)" == Darwin || -w /dev/kvm ]] || { echo "/dev/kvm is not writable; KVM is required" >&2; exit 1; }
 
 rm -rf "${dir:?}/boot" "${dir:?}/usb-boot" "${dir:?}/installed-boot"
 rm -f "$dir"/*.png "$dir"/*.log "$dir"/*.txt "$dir/summary.md" "$dir/summary.extra"
@@ -77,7 +85,7 @@ fi
 qemu-img create -q -f qcow2 "$dir/disk.qcow2" 64G
 # Snapshot the blank install target. Compare its guest-visible contents before
 # invoking the installer to catch accidental automount/setup writes in live.
-cp --reflink=auto "$dir/disk.qcow2" "$dir/disk-before-live.qcow2"
+cp "$dir/disk.qcow2" "$dir/disk-before-live.qcow2"
 
 # start_vm [cd|usb]: the VM, with the ISO as its CD or as a USB stick (the
 # ISO's bytes as a disk, as dd writes them; writes go to a throwaway
@@ -397,31 +405,38 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     # there to report on it or not, the disk says what got installed.
     echo "::group::installed system"
     set +e
-    sudo modprobe nbd max_part=16
-    sudo qemu-nbd --connect=/dev/nbd0 "$dir/disk.qcow2"
-    sleep 3
-    sudo partprobe /dev/nbd0 2>/dev/null
-    # udev probes the partitions' file systems after partprobe returns; until
-    # it has, lsblk shows none and the check finds no deployment (v0.5.8's
-    # Hyprland install finished, yet its disk was read too early).
-    sudo udevadm settle --timeout=30 2>/dev/null
-    for _ in $(seq 1 15); do
-        lsblk -lno FSTYPE /dev/nbd0 | grep -q . && break
-        sleep 2
-    done
-    lsblk -f /dev/nbd0
-    # The channel the installed system must follow: LIVE_TRACK_IMAGE (what
-    # live.yml built the ISO with), or the ISO's variant's :latest.
-    track_image="${LIVE_TRACK_IMAGE:-}"
-    if [[ -z "$track_image" ]]; then
-        track_image=ghcr.io/agentux-os/agentux:latest
-        [[ "$(basename "$iso")" == *cosmic* ]] && track_image=ghcr.io/agentux-os/agentux-cosmic:latest
+    if [[ "$(uname -s)" == Darwin ]]; then
+        # macOS has no nbd, so the disk can't be read here: only its first boot
+        # below says what got installed.
+        echo "skipped: reading the installed disk needs qemu-nbd (Linux)" | tee "$dir/install-verify.log"
+        verify_rc=skipped
+    else
+        sudo modprobe nbd max_part=16
+        sudo qemu-nbd --connect=/dev/nbd0 "$dir/disk.qcow2"
+        sleep 3
+        sudo partprobe /dev/nbd0 2>/dev/null
+        # udev probes the partitions' file systems after partprobe returns; until
+        # it has, lsblk shows none and the check finds no deployment (v0.5.8's
+        # Hyprland install finished, yet its disk was read too early).
+        sudo udevadm settle --timeout=30 2>/dev/null
+        for _ in $(seq 1 15); do
+            lsblk -lno FSTYPE /dev/nbd0 | grep -q . && break
+            sleep 2
+        done
+        lsblk -f /dev/nbd0
+        # The channel the installed system must follow: LIVE_TRACK_IMAGE (what
+        # live.yml built the ISO with), or the ISO's variant's :latest.
+        track_image="${LIVE_TRACK_IMAGE:-}"
+        if [[ -z "$track_image" ]]; then
+            track_image=ghcr.io/agentux-os/agentux:latest
+            [[ "$(basename "$iso")" == *cosmic* ]] && track_image=ghcr.io/agentux-os/agentux-cosmic:latest
+        fi
+        sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TEST_VARIANT="${LIVE_TEST_VARIANT:-plasma}" \
+            LIVE_TRACK_IMAGE="$track_image" LIVE_FIRMWARE="$firmware_mode" \
+            bash "$here/live.sh" | tee "$dir/install-verify.log"
+        verify_rc=${PIPESTATUS[0]}
+        sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
     fi
-    sudo env LIVE_PHASE=verify LIVE_TARGET=/dev/nbd0 LIVE_TEST_VARIANT="${LIVE_TEST_VARIANT:-plasma}" \
-        LIVE_TRACK_IMAGE="$track_image" LIVE_FIRMWARE="$firmware_mode" \
-        bash "$here/live.sh" | tee "$dir/install-verify.log"
-    verify_rc=${PIPESTATUS[0]}
-    sudo qemu-nbd --disconnect /dev/nbd0 >/dev/null
     set -e
     echo "::endgroup::"
     if [[ "$install_rc" != 0 ]] || grep -q '^FAIL no ostree deployment' "$dir/install-verify.log"; then
@@ -431,11 +446,16 @@ if [[ "${LIVE_TEST_INSTALL:-1}" == 1 ]]; then
     else
         # The disk decides: an install that left a deployment finished,
         # whatever the guest could still report.
-        sed -i '/^FAIL anaconda failed (exit none)/d' "$dir/install.log"
-        echo "ok   AgentUX deployment on the disk" >>"$dir/install.log"
-        summary_phase "Install from the live system" "$(grep -q '^FAIL ' "$dir/install.log" && echo 1 || echo 0)" "$dir/install.log"
-        summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
-        (( verify_rc == 0 )) || system_rc=1
+        if [[ "$verify_rc" == skipped ]]; then
+            summary_phase "Install from the live system" "$(grep -q '^FAIL ' "$dir/install.log" && echo 1 || echo 0)" "$dir/install.log"
+            summary_line "Installed system checks" "skipped: reading the disk needs qemu-nbd (Linux)"
+        else
+            sed -i.orig '/^FAIL anaconda failed (exit none)/d' "$dir/install.log" && rm "$dir/install.log.orig"
+            echo "ok   AgentUX deployment on the disk" >>"$dir/install.log"
+            summary_phase "Install from the live system" "$(grep -q '^FAIL ' "$dir/install.log" && echo 1 || echo 0)" "$dir/install.log"
+            summary_phase "Installed system checks" "$verify_rc" "$dir/install-verify.log"
+            (( verify_rc == 0 )) || system_rc=1
+        fi
 
         # The installed disk alone: Plasma's setup wizard or COSMIC's Initial Setup.
         start_vm
