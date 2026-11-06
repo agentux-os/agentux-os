@@ -23,7 +23,9 @@
 #
 # Layout of the bucket:
 #   iso/stable/<prefix>-<arch>.iso        the newest release
-#   iso/<tag>/<prefix>-<tag>-<arch>.iso   every release, kept
+#   iso/<tag>/<prefix>-<tag>-<arch>.iso   every release with ISOs (a component
+#                                         bump's has none: see
+#                                         publish-images-release.sh)
 #   iso/nightly/<prefix>-<arch>.iso       the newest weekly or dispatched build
 #   latest.json                           the newest release, for the website
 #   releases.json                         every release's image digests, for agentux-version

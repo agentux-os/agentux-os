@@ -11,6 +11,17 @@ Start with a `## Highlights` heading and keep it short: what a user of the
 release notices, with a sentence each. Preview the whole notes with
 `just release-notes <tag>`.
 
+## Releases without ISOs
+
+The patch tags `patch-tag.yml` pushes after a component bump say
+`Release-ISOs: none` in their message. Their release builds no ISOs: once
+approved, it moves `:<tag>` and `:stable` and creates the GitHub release,
+whose downloads point at the newest ISOs in `iso/stable/`; `latest.json`
+stays on that release. Systems installed from those ISOs reach the new
+release with `bootc upgrade`. To ship new ISOs, push a tag by hand without
+that line (`git tag -a vX.Y.Z -m "AgentUX vX.Y.Z"`), and run the aarch64
+check below before approving it.
+
 ## The aarch64 live ISOs
 
 GitHub's arm64 runners have no KVM, so CI builds the aarch64 ISOs but does
