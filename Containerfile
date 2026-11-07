@@ -264,7 +264,7 @@ RUN jq --arg key /etc/pki/containers/agentux-os.pub \
 # AgentUX itself, pinned to GitHub releases in this one place.
 # `just bump-agentux` moves the pins to the latest releases (pre-releases
 # included) and recomputes the desktop overlay checksums.
-ARG AGENTUX_CORE_VERSION=0.5.5
+ARG AGENTUX_CORE_VERSION=0.5.6
 ARG AGENTUX_OFFICE_VERSION=0.1.0
 ARG AGENTUX_DESKTOP_VERSION=0.5.16
 ARG AGENTUX_PLASMA_SHA256=95826c0da01a6a3cb5fcbcd082a929e1fc5f03516fc2e56a0b7977eea1d6a5bd
